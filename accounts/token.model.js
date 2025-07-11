@@ -3,14 +3,13 @@ const Schema = mongoose.Schema;
 
 const schema = new Schema({
     account: { type: Schema.Types.ObjectId, ref: 'Account' },
-    token: String,
-    expires: Date,
+    token: { type: String, required: true },
+    expires: { type: Date, required: true },
     created: { type: Date, default: Date.now },
-    createdByIp: String,
-    revoked: Date,
-    revokedByIp: String,
-    replacedByToken: 
-    String
+    createdByIp: { type: String },
+    revoked: { type: Date },
+    revokedByIp: { type: String },
+    replacedByToken: { type: String }
 });
 
 schema.virtual('isExpired').get(function () {
@@ -21,4 +20,4 @@ schema.virtual('isActive').get(function () {
     return !this.revoked && !this.isExpired;
 });
 
-module.exports = mongoose.model('RefreshToken', schema);
+module.exports = mongoose.model('Token', schema);
