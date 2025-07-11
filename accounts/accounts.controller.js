@@ -5,6 +5,14 @@ const validateRequest = require('_middleware/validate-request');
 const authorize = require('_middleware/authorize')
 const Role = require('_helpers/role');
 const accountService = require('./account.service');
+const upload = require('../_middleware/upload');
+const jwt = require('jsonwebtoken');
+const config = require('../config.json');
+const Account = require('./account.model');
+const bcrypt = require('bcryptjs');
+
+
+
 
 // routes
 router.post('/authenticate', authenticateSchema, authenticate);
@@ -16,13 +24,25 @@ router.post('/forgot-password', forgotPasswordSchema, forgotPassword);
 router.post('/validate-reset-token', validateResetTokenSchema, validateResetToken);
 router.post('/reset-password', resetPasswordSchema, resetPassword);
 router.get('/', authorize(Role.Admin), getAll);
+router.get('/verified', authorize(), getVerifiedUsers);
 router.get('/:id', authorize(), getById);
+
+
 router.post('/', authorize(Role.Admin), createSchema, create);
-router.put('/:id', authorize(), updateSchema, update);
+// router.put('/:id', authorize(), updateSchema, update);
+router.put('/:id', authorize(), upload.array('photos', 6), update); // no updateSchema here
+
+// router.put('/:id', authorize(), upload.array('photos', 6), updateSchema, update);
 router.delete('/:id', authorize(), _delete);
 
 module.exports = router;
 
+// const jwt = require('jsonwebtoken');
+// const config = require('../config.json'); // Load config.json
+
+function generateJwtToken(userId) {
+    return jwt.sign({ userId: userId }, config.JWT_SECRET, { expiresIn: '7d' });
+}
 function authenticateSchema(req, res, next) {
     const schema = Joi.object({
         email: Joi.string().required(),
@@ -30,17 +50,20 @@ function authenticateSchema(req, res, next) {
     });
     validateRequest(req, next, schema);
 }
-
 function authenticate(req, res, next) {
     const { email, password } = req.body;
     const ipAddress = req.ip;
+
     accountService.authenticate({ email, password, ipAddress })
-        .then(({ refreshToken, ...account }) => {
+        .then(({ jwtToken, refreshToken, ...account }) => {
             setTokenCookie(res, refreshToken);
-            res.json(account);
+            res.json({ ...account, token: jwtToken }); // ✅ Include token
         })
         .catch(next);
 }
+
+
+
 
 function refreshToken(req, res, next) {
     const token = req.cookies.refreshToken;
@@ -83,38 +106,41 @@ function registerSchema(req, res, next) {
         firstName: Joi.string().required(),
         lastName: Joi.string().required(),
         email: Joi.string().email().required(),
+        gender: Joi.string().valid('Men', 'Women', 'Non-binary').required(),
+
+        // location: Joi.string().required(),
+        type: Joi.string().required(),  // ✅ Required type field
         password: Joi.string().min(6).required(),
         confirmPassword: Joi.string().valid(Joi.ref('password')),
-        // acceptTerms: Joi.boolean().valid(true).required()
     });
     validateRequest(req, next, schema);
 }
 
-// function register(req, res, next) {
-//     accountService.register(req.body, req.get('origin'))
-//         .then(() => res.json({ message: 'Registration successful, please check your email for verification instructions' }))
-//         .catch(next);
-// }
 
 
 // function register(req, res, next) {
 //     accountService.register(req.body, req.get('origin'))
 //         .then(user => {
 //             if (!user) {
+//                 console.error("User registration failed - no user returned");
 //                 return res.status(400).json({ message: "User registration failed" });
 //             }
 
 //             // Generate JWT token after successful registration
-//             const token = generateToken(user.id);  
+//             const token = generateJwtToken(user.id);
 
 //             res.json({
 //                 message: "Registration successful, please check your email for verification instructions",
-//                 token: token,  
+//                 token: token,
 //                 userId: user.id
 //             });
 //         })
-//         .catch(next);
+//         .catch(error => {
+//             console.error("User registration error:", error);
+//             res.status(500).json({ message: "User registration failed", error: error.toString() });
+//         });
 // }
+
 
 function register(req, res, next) {
     accountService.register(req.body, req.get('origin'))
@@ -141,6 +167,9 @@ function register(req, res, next) {
 
 
 
+
+
+
 function verifyEmailSchema(req, res, next) {
     const schema = Joi.object({
         token: Joi.string().required()
@@ -153,6 +182,21 @@ function verifyEmail(req, res, next) {
         .then(() => res.json({ message: 'Verification successful, you can now login' }))
         .catch(next);
 }
+
+
+
+function getVerifiedUsers(req, res, next) {
+    const currentUserId = req.user.id; // 🔐 comes from JWT authorize middleware
+
+    accountService.getVerifiedUsers()
+        .then(users => {
+            // 🧼 filter out the logged-in user
+            const filteredUsers = users.filter(user => user.id !== currentUserId);
+            res.json(filteredUsers);
+        })
+        .catch(next);
+}
+
 
 function forgotPasswordSchema(req, res, next) {
     const schema = Joi.object({
@@ -206,10 +250,11 @@ function getById(req, res, next) {
     if (req.params.id !== req.user.id && req.user.role !== Role.Admin) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
-
     accountService.getById(req.params.id)
-        .then(account => account ? res.json(account) : res.sendStatus(404))
+        .then(account => account ? res.json({ user: account }) : res.sendStatus(404))  // ✅ wrap it!
         .catch(next);
+
+
 }
 
 function createSchema(req, res, next) {
@@ -218,6 +263,7 @@ function createSchema(req, res, next) {
         firstName: Joi.string().required(),
         lastName: Joi.string().required(),
         email: Joi.string().email().required(),
+        type: Joi.string().type().required(),
         password: Joi.string().min(6).required(),
         confirmPassword: Joi.string().valid(Joi.ref('password')).required(),
         role: Joi.string().valid(Role.Admin, Role.User).required()
@@ -231,35 +277,59 @@ function create(req, res, next) {
         .catch(next);
 }
 
+// Validation schema
 function updateSchema(req, res, next) {
-    const schemaRules = {
+    const schema = Joi.object({
+        email: Joi.string().email().empty(''),
         title: Joi.string().empty(''),
         firstName: Joi.string().empty(''),
         lastName: Joi.string().empty(''),
-        email: Joi.string().email().empty(''),
         password: Joi.string().min(6).empty(''),
-        confirmPassword: Joi.string().valid(Joi.ref('password')).empty('')
-    };
+        confirmPassword: Joi.string().valid(Joi.ref('password')).empty(''),
+        gender: Joi.string().valid('Male', 'Female', 'Other').empty(''),
+        location: Joi.string().empty(''),
+        type: Joi.string().empty(''),
+        bio: Joi.string().allow('', null),
+        graduationYear: Joi.string().allow('', null),
+        degree: Joi.string().allow('', null),
+        photos: Joi.array().items(Joi.string()).optional()
+    }).with('password', 'confirmPassword');
 
-    // only admins can update role
-    if (req.user.role === Role.Admin) {
-        schemaRules.role = Joi.string().valid(Role.Admin, Role.User).empty('');
-    }
-
-    const schema = Joi.object(schemaRules).with('password', 'confirmPassword');
     validateRequest(req, next, schema);
 }
 
 function update(req, res, next) {
-    // users can update their own account and admins can update any account
     if (req.params.id !== req.user.id && req.user.role !== Role.Admin) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
 
+    // 👇 Confirm incoming body and files
+    console.log('🛠 Incoming update body:', req.body);
+    console.log('📸 Uploaded photos:', req.files);
+
+    // Add photo paths if files are uploaded
+    if (req.files && req.files.length > 0) {
+        const photoPaths = req.files.map(file => `/uploads/${file.filename}`);
+        req.body.photos = photoPaths;
+    }
+
+    // 🔍 Manually parse and validate interests if sent as stringified JSON
+    if (req.body.interests && typeof req.body.interests === 'string') {
+        try {
+            req.body.interests = JSON.parse(req.body.interests);
+        } catch (err) {
+            return res.status(400).json({ message: 'Invalid interests format' });
+        }
+    }
+
+    // Skip Joi validation for now — can be added later once body parsing works
+
     accountService.update(req.params.id, req.body)
-        .then(account => res.json(account))
+        .then(account => res.json({ user: account })) // ✅ send user object for frontend
         .catch(next);
 }
+
+
 
 function _delete(req, res, next) {
     // users can delete their own account and admins can delete any account
@@ -274,19 +344,19 @@ function _delete(req, res, next) {
 
 // helper functions
 
+function randomTokenString() {
+    const crypto = require('crypto');
+    return crypto.randomBytes(40).toString('hex');
+}
+
 function setTokenCookie(res, token) {
     // create cookie with refresh token that expires in 7 days
     const cookieOptions = {
         httpOnly: true,
-        expires: new Date(Date.now() + 7*24*60*60*1000)
+        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     };
     res.cookie('refreshToken', token, cookieOptions);
 }
 
-const jwt = require('jsonwebtoken');
-const config = require('../config.json'); // Load config.json
 
-function generateJwtToken(userId) {
-    return jwt.sign({ userId: userId }, config.JWT_SECRET, { expiresIn: '7d' });
-}
 
