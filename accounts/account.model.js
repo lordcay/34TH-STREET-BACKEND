@@ -1,27 +1,24 @@
+
+
+
 // const mongoose = require('mongoose');
 // const Schema = mongoose.Schema;
 
 // const schema = new Schema({
 //     email: { type: String, unique: true, required: true },
 //     passwordHash: { type: String, required: true },
-//     title: { type: String,  },
+//     title: { type: String },
 //     firstName: { type: String, required: true },
 //     lastName: { type: String, required: true },
 //     gender: { type: String, required: true },
-//     // birth: { type: String, required: true },
-//     // location: { type: String, required: true },
 //     type: { type: String, required: true },
-//     // photos: [String],  // Array of image URLs or paths
 
-
-//         // ✅ Newly added fields
 //     phone: { type: String },
 //     origin: { type: String },
 //     bio: { type: String, maxlength: 700 },
 //     interests: [{ type: String }],
-//     photos: [String],  // Already exists
-//     // acceptTerms: Boolean,
-//     // role: { type: String, required: true },
+//     photos: [String],
+
 //     verificationToken: String,
 //     verified: Date,
 //     resetToken: {
@@ -33,6 +30,7 @@
 //     updated: Date
 // });
 
+// // ✅ Ensure isVerified works during login
 // schema.virtual('isVerified').get(function () {
 //     return !!(this.verified || this.passwordReset);
 // });
@@ -41,7 +39,6 @@
 //     virtuals: true,
 //     versionKey: false,
 //     transform: function (doc, ret) {
-//         // remove these props when object is serialized
 //         delete ret._id;
 //         delete ret.passwordHash;
 //     }
@@ -62,11 +59,22 @@ const schema = new Schema({
     gender: { type: String, required: true },
     type: { type: String, required: true },
 
+    // New Fields
+    nickname: { type: String },
+    DOB: { type: Date },
     phone: { type: String },
     origin: { type: String },
     bio: { type: String, maxlength: 700 },
     interests: [{ type: String }],
     photos: [String],
+    languages: [{ type: String }],
+    fieldOfStudy: { type: String },
+    graduationYear: { type: String },
+    industry: { type: String },
+    currentRole: { type: String },
+    linkedIn: { type: String },
+    funFact: { type: String },
+    rship: { type: String },
 
     verificationToken: String,
     verified: Date,
@@ -79,7 +87,6 @@ const schema = new Schema({
     updated: Date
 });
 
-// ✅ Ensure isVerified works during login
 schema.virtual('isVerified').get(function () {
     return !!(this.verified || this.passwordReset);
 });

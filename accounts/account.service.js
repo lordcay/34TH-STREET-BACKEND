@@ -291,15 +291,29 @@ function randomTokenString() {
 }
 
 function basicDetails(account) {
+
     const {
-        id, title, firstName, lastName, email, gender, location,
-        type, created, updated, verified, interests, bio, phone, photos
+        id, title, firstName, lastName, email, gender, type,
+        phone, origin, bio, interests, photos, created, updated, verified,
+        nickname, DOB, languages, fieldOfStudy, graduationYear,
+        industry, currentRole, linkedIn, funFact, rship
     } = account;
 
     return {
-        id, title, firstName, lastName, email, gender, location,
-        type, created, updated, verified, interests, bio, phone, photos
+        id, title, firstName, lastName, email, gender, type,
+        phone, origin, bio, interests, photos, created, updated, verified,
+        nickname, DOB, languages, fieldOfStudy, graduationYear,
+        industry, currentRole, linkedIn, funFact, rship
     };
+    // const {
+    //     id, title, firstName, lastName, email, gender, location,
+    //     type, created, updated, verified, interests, bio, phone, photos
+    // } = account;
+
+    // return {
+    //     id, title, firstName, lastName, email, gender, location,
+    //     type, created, updated, verified, interests, bio, phone, photos
+    // };
 }
 
 
