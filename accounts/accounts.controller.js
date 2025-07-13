@@ -277,7 +277,6 @@ function create(req, res, next) {
         .catch(next);
 }
 
-// Validation schema
 function updateSchema(req, res, next) {
     const schema = Joi.object({
         email: Joi.string().email().empty(''),
@@ -286,17 +285,49 @@ function updateSchema(req, res, next) {
         lastName: Joi.string().empty(''),
         password: Joi.string().min(6).empty(''),
         confirmPassword: Joi.string().valid(Joi.ref('password')).empty(''),
-        gender: Joi.string().valid('Male', 'Female', 'Other').empty(''),
-        location: Joi.string().empty(''),
+        gender: Joi.string().valid('Men', 'Women', 'Non-binary').empty(''),
         type: Joi.string().empty(''),
         bio: Joi.string().allow('', null),
         graduationYear: Joi.string().allow('', null),
-        degree: Joi.string().allow('', null),
+        fieldOfStudy: Joi.string().allow('', null),
+        currentRole: Joi.string().allow('', null),
+        industry: Joi.string().allow('', null),
+        linkedIn: Joi.string().uri().allow('', null),
+        funFact: Joi.string().allow('', null),
+        rship: Joi.string().valid('Single', 'Married', 'Dating', 'It’s complicated', 'Prefer not to say').allow('', null),
+        phone: Joi.string().allow('', null),
+        origin: Joi.string().allow('', null),
+        nickname: Joi.string().allow('', null),
+        DOB: Joi.date().allow(null),
+        languages: Joi.alternatives().try(Joi.array().items(Joi.string()), Joi.string()),
+        interests: Joi.alternatives().try(Joi.array().items(Joi.string()), Joi.string()),
         photos: Joi.array().items(Joi.string()).optional()
     }).with('password', 'confirmPassword');
 
     validateRequest(req, next, schema);
 }
+
+
+// Validation schema
+// function updateSchema(req, res, next) {
+//     const schema = Joi.object({
+//         email: Joi.string().email().empty(''),
+//         title: Joi.string().empty(''),
+//         firstName: Joi.string().empty(''),
+//         lastName: Joi.string().empty(''),
+//         password: Joi.string().min(6).empty(''),
+//         confirmPassword: Joi.string().valid(Joi.ref('password')).empty(''),
+//         gender: Joi.string().valid('Male', 'Female', 'Other').empty(''),
+//         location: Joi.string().empty(''),
+//         type: Joi.string().empty(''),
+//         bio: Joi.string().allow('', null),
+//         graduationYear: Joi.string().allow('', null),
+//         degree: Joi.string().allow('', null),
+//         photos: Joi.array().items(Joi.string()).optional()
+//     }).with('password', 'confirmPassword');
+
+//     validateRequest(req, next, schema);
+// }
 
 function update(req, res, next) {
     if (req.params.id !== req.user.id && req.user.role !== Role.Admin) {
