@@ -1,0 +1,14 @@
+{
+    "connectionString": "mongodb+srv://calebs:calebs@cluster0.guzwh.mongodb.net/",
+    "secret": "THIS IS USED TO SIGN AND VERIFY JWT TOKENS, REPLACE IT WITH YOUR OWN SECRET, IT CAN BE ANY STRING",
+    "JWT_SECRET": "your_super_secret_key",
+    "emailFrom": "Info@34thstreet.net",
+    "smtpOptions": {
+        "host": "smtp.hostinger.com",
+        "port": 465,
+        "auth": {
+            "user": "Info@34thstreet.net",
+            "pass": "Nche@2025"
+        }
+    }
+}

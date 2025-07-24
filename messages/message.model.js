@@ -6,7 +6,9 @@ const schema = new Schema({
   senderId: { type: Schema.Types.ObjectId, ref: 'Account', required: true },
   recipientId: { type: Schema.Types.ObjectId, ref: 'Account', required: true },
   message: { type: String, required: true },
-  timestamp: { type: Date, default: Date.now }
+  timestamp: { type: Date, default: Date.now },
+  read: { type: Boolean, default: false }  // ✅ New field to track read status
+
 });
 
 module.exports = mongoose.model('Message', schema);

@@ -7,7 +7,7 @@ const Role = require('_helpers/role');
 const accountService = require('./account.service');
 const upload = require('../_middleware/upload');
 const jwt = require('jsonwebtoken');
-const config = require('../config.js');
+const config = require('../config.json');
 const Account = require('./account.model');
 const bcrypt = require('bcryptjs');
 
@@ -30,7 +30,9 @@ router.get('/:id', authorize(), getById);
 
 router.post('/', authorize(Role.Admin), createSchema, create);
 // router.put('/:id', authorize(), updateSchema, update);
-router.put('/:id', authorize(), upload.array('photos', 6), update); // no updateSchema here
+router.put('/:id', authorize(), update);
+
+// router.put('/:id', authorize(), upload.array('photos', 6), update); // no updateSchema here
 
 // router.put('/:id', authorize(), upload.array('photos', 6), updateSchema, update);
 router.delete('/:id', authorize(), _delete);
@@ -38,7 +40,7 @@ router.delete('/:id', authorize(), _delete);
 module.exports = router;
 
 // const jwt = require('jsonwebtoken');
-// const config = require('../config.json'); // Load config.json
+// const config = require('../config.jsonon'); // Load config.jsonon
 
 function generateJwtToken(userId) {
     return jwt.sign({ userId: userId }, config.JWT_SECRET, { expiresIn: '7d' });
@@ -106,7 +108,7 @@ function registerSchema(req, res, next) {
         firstName: Joi.string().required(),
         lastName: Joi.string().required(),
         email: Joi.string().email().required(),
-        gender: Joi.string().valid('Men', 'Women', 'Non-binary').required(),
+        gender: Joi.string().valid('Male', 'Female', 'Non-binary').required(),
 
         // location: Joi.string().required(),
         type: Joi.string().required(),  // ✅ Required type field
@@ -285,7 +287,7 @@ function updateSchema(req, res, next) {
         lastName: Joi.string().empty(''),
         password: Joi.string().min(6).empty(''),
         confirmPassword: Joi.string().valid(Joi.ref('password')).empty(''),
-        gender: Joi.string().valid('Men', 'Women', 'Non-binary').empty(''),
+        gender: Joi.string().valid('Male', 'Female', 'Non-binary').empty(''),
         type: Joi.string().empty(''),
         bio: Joi.string().allow('', null),
         graduationYear: Joi.string().allow('', null),
@@ -334,17 +336,6 @@ function update(req, res, next) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    // 👇 Confirm incoming body and files
-    console.log('🛠 Incoming update body:', req.body);
-    console.log('📸 Uploaded photos:', req.files);
-
-    // Add photo paths if files are uploaded
-    if (req.files && req.files.length > 0) {
-        const photoPaths = req.files.map(file => `/uploads/${file.filename}`);
-        req.body.photos = photoPaths;
-    }
-
-    // 🔍 Manually parse and validate interests if sent as stringified JSON
     if (req.body.interests && typeof req.body.interests === 'string') {
         try {
             req.body.interests = JSON.parse(req.body.interests);
@@ -353,12 +344,42 @@ function update(req, res, next) {
         }
     }
 
-    // Skip Joi validation for now — can be added later once body parsing works
-
     accountService.update(req.params.id, req.body)
-        .then(account => res.json({ user: account })) // ✅ send user object for frontend
+        .then(account => res.json({ user: account }))
         .catch(next);
 }
+
+
+// function update(req, res, next) {
+//     if (req.params.id !== req.user.id && req.user.role !== Role.Admin) {
+//         return res.status(401).json({ message: 'Unauthorized' });
+//     }
+
+//     // 👇 Confirm incoming body and files
+//     console.log('🛠 Incoming update body:', req.body);
+//     // console.log('📸 Uploaded photos:', req.files);
+
+//     // Add photo paths if files are uploaded
+//     // if (req.files && req.files.length > 0) {
+//     //     const photoPaths = req.files.map(file => `/uploads/${file.filename}`);
+//     //     req.body.photos = photoPaths;
+//     // }
+
+//     // 🔍 Manually parse and validate interests if sent as stringified JSON
+//     if (req.body.interests && typeof req.body.interests === 'string') {
+//         try {
+//             req.body.interests = JSON.parse(req.body.interests);
+//         } catch (err) {
+//             return res.status(400).json({ message: 'Invalid interests format' });
+//         }
+//     }
+
+//     // Skip Joi validation for now — can be added later once body parsing works
+
+//     accountService.update(req.params.id, req.body)
+//         .then(account => res.json({ user: account })) // ✅ send user object for frontend
+//         .catch(next);
+// }
 
 
 
