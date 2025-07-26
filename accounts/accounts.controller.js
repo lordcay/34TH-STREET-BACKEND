@@ -7,7 +7,7 @@ const Role = require('_helpers/role');
 const accountService = require('./account.service');
 const upload = require('../_middleware/upload');
 const jwt = require('jsonwebtoken');
-const config = require('../config.json');
+const config = require('../config.js');
 const Account = require('./account.model');
 const bcrypt = require('bcryptjs');
 
@@ -26,6 +26,8 @@ router.post('/reset-password', resetPasswordSchema, resetPassword);
 router.get('/', authorize(Role.Admin), getAll);
 router.get('/verified', authorize(), getVerifiedUsers);
 router.get('/:id', authorize(), getById);
+router.post('/push-token', authorize(), savePushToken);
+
 
 
 router.post('/', authorize(Role.Admin), createSchema, create);
@@ -40,7 +42,7 @@ router.delete('/:id', authorize(), _delete);
 module.exports = router;
 
 // const jwt = require('jsonwebtoken');
-// const config = require('../config.jsonon'); // Load config.jsonon
+// const config = require('../config.js'); // Load config.js
 
 function generateJwtToken(userId) {
     return jwt.sign({ userId: userId }, config.JWT_SECRET, { expiresIn: '7d' });
@@ -64,7 +66,24 @@ function authenticate(req, res, next) {
         .catch(next);
 }
 
+async function savePushToken(req, res, next) {
+    try {
+        const userId = req.user.id;
+        const { expoPushToken } = req.body;
 
+        if (!expoPushToken) {
+            return res.status(400).json({ message: 'Expo push token required' });
+        }
+
+        const account = await db.Account.findById(userId);
+        account.expoPushToken = expoPushToken;
+        await account.save();
+
+        res.json({ message: '✅ Push token saved!' });
+    } catch (err) {
+        next(err);
+    }
+}
 
 
 function refreshToken(req, res, next) {

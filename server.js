@@ -53,6 +53,9 @@ const io = new Server(server, {
     }
 });
 
+global.io = io; // ✅ ✅ ✅ Add this line
+
+
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
@@ -121,6 +124,11 @@ io.on('connection', (socket) => {
         }
     });
 });
+
+// ✅ Make Socket.IO + connected users accessible in routes/controllers
+app.set('io', io);
+app.set('connectedUsers', connectedUsers);
+
 
 // ✅ Start both HTTP and WebSocket servers
 const port = process.env.NODE_ENV === 'production' ? (process.env.PORT || 80) : 4000;

@@ -7,7 +7,9 @@ const schema = new Schema({
   recipientId: { type: Schema.Types.ObjectId, ref: 'Account', required: true },
   message: { type: String, required: true },
   timestamp: { type: Date, default: Date.now },
-  read: { type: Boolean, default: false }  // ✅ New field to track read status
+  read: { type: Boolean, default: false },  // ✅ New field to track read status
+  expoPushToken: { type: String }
+
 
 });
 
