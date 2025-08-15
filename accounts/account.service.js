@@ -166,23 +166,66 @@ async function verifyEmail({ token }) {
     await account.save();
 }
 
+// async function forgotPassword({ email }, origin) {
+//     const account = await Account.findOne({ email });
+//     if (!account) return;
+
+//     account.resetToken = {
+//         token: randomTokenString(),
+//         expires: new Date(Date.now() + 24 * 60 * 60 * 1000)
+//     };
+
 async function forgotPassword({ email }, origin) {
     const account = await Account.findOne({ email });
     if (!account) return;
 
+    // Invalidate any old token
+    account.resetToken = undefined;
+
+    // Create new 6-digit code as reset token
+    const resetCode = generateResetCode();
     account.resetToken = {
-        token: randomTokenString(),
-        expires: new Date(Date.now() + 24 * 60 * 60 * 1000)
+        token: resetCode,
+        expires: new Date(Date.now() + 24 * 60 * 60 * 1000) // expires in 24h
     };
+
     await account.save();
 
     await sendPasswordResetEmail(account, origin);
 }
 
+
+
+
+// await account.save();
+
+// await sendPasswordResetEmail(account, origin);
+// }
+
 async function validateResetToken({ token }) {
     const account = await Account.findOne({ 'resetToken.token': token });
     if (!account || account.resetToken.expires < Date.now()) throw 'Invalid token';
 }
+
+// async function resetPassword({ token, password }) {
+//     const account = await Account.findOne({ 'resetToken.token': token });
+
+//     if (!account) {
+//         throw { status: 400, message: 'Invalid or expired reset code.' };
+//     }
+
+//     if (account.resetToken.expires < Date.now()) {
+//         throw { status: 400, message: 'Reset code has expired. Please request a new one.' };
+//     }
+
+//     // Prevent reuse by removing the token
+//     account.passwordHash = bcrypt.hashSync(password, 10);
+//     account.passwordReset = Date.now();
+//     account.resetToken = undefined;
+
+//     await account.save();
+// }
+
 
 async function resetPassword({ token, password }) {
     const account = await Account.findOne({ 'resetToken.token': token });
@@ -349,4 +392,9 @@ async function sendPasswordResetEmail(account, origin) {
         subject: 'Reset Password',
         html: `<h4>Reset Password</h4>${message}`
     });
+}
+
+
+function generateResetCode() {
+    return Math.floor(100000 + Math.random() * 900000).toString(); // Generates 6-digit string
 }
