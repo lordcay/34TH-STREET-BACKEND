@@ -26,6 +26,8 @@ router.post('/reset-password', resetPasswordSchema, resetPassword);
 router.get('/', authorize(Role.Admin), getAll);
 router.get('/verified', authorize(), getVerifiedUsers);
 router.get('/:id', authorize(), getById);
+router.post('/push-token', authorize(), savePushToken);
+
 
 
 router.post('/', authorize(Role.Admin), createSchema, create);
@@ -64,7 +66,24 @@ function authenticate(req, res, next) {
         .catch(next);
 }
 
+async function savePushToken(req, res, next) {
+    try {
+        const userId = req.user.id;
+        const { expoPushToken } = req.body;
 
+        if (!expoPushToken) {
+            return res.status(400).json({ message: 'Expo push token required' });
+        }
+
+        const account = await db.Account.findById(userId);
+        account.expoPushToken = expoPushToken;
+        await account.save();
+
+        res.json({ message: '✅ Push token saved!' });
+    } catch (err) {
+        next(err);
+    }
+}
 
 
 function refreshToken(req, res, next) {
