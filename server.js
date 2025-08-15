@@ -179,7 +179,12 @@ const io = new Server(server, {
     },
 });
 
+<<<<<<< HEAD
 global.io = io; // ✅ Global access if needed elsewhere
+=======
+global.io = io; // ✅ ✅ ✅ Add this line
+
+>>>>>>> fb9cc96a2ece9a99d3ac0395c6d21bbebe921086
 
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
@@ -289,11 +294,20 @@ io.on('connection', (socket) => {
     });
 });
 
+<<<<<<< HEAD
 // ✅ Set global references
 app.set('io', io);
 app.set('connectedUsers', connectedUsers);
 
 // ✅ Start HTTP + Socket.IO
+=======
+// ✅ Make Socket.IO + connected users accessible in routes/controllers
+app.set('io', io);
+app.set('connectedUsers', connectedUsers);
+
+
+// ✅ Start both HTTP and WebSocket servers
+>>>>>>> fb9cc96a2ece9a99d3ac0395c6d21bbebe921086
 const port = process.env.NODE_ENV === 'production' ? (process.env.PORT || 80) : 4000;
 server.listen(port, () => {
     console.log(`🚀 Server listening on http://localhost:${port}`);
