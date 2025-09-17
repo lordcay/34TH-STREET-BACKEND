@@ -7,7 +7,7 @@ const Role = require('_helpers/role');
 const accountService = require('./account.service');
 const upload = require('../_middleware/upload');
 const jwt = require('jsonwebtoken');
-const config = require('../config.js');
+const config = require('../config.json');
 const Account = require('./account.model');
 const bcrypt = require('bcryptjs');
 
@@ -42,7 +42,7 @@ router.delete('/:id', authorize(), _delete);
 module.exports = router;
 
 // const jwt = require('jsonwebtoken');
-// const config = require('../config.js'); // Load config.js
+// const config = require('../config.json'); // Load config.json
 
 function generateJwtToken(userId) {
     return jwt.sign({ userId: userId }, config.JWT_SECRET, { expiresIn: '7d' });
@@ -139,28 +139,7 @@ function registerSchema(req, res, next) {
 
 
 
-// function register(req, res, next) {
-//     accountService.register(req.body, req.get('origin'))
-//         .then(user => {
-//             if (!user) {
-//                 console.error("User registration failed - no user returned");
-//                 return res.status(400).json({ message: "User registration failed" });
-//             }
 
-//             // Generate JWT token after successful registration
-//             const token = generateJwtToken(user.id);
-
-//             res.json({
-//                 message: "Registration successful, please check your email for verification instructions",
-//                 token: token,
-//                 userId: user.id
-//             });
-//         })
-//         .catch(error => {
-//             console.error("User registration error:", error);
-//             res.status(500).json({ message: "User registration failed", error: error.toString() });
-//         });
-// }
 
 
 function register(req, res, next) {
@@ -329,26 +308,7 @@ function updateSchema(req, res, next) {
 }
 
 
-// Validation schema
-// function updateSchema(req, res, next) {
-//     const schema = Joi.object({
-//         email: Joi.string().email().empty(''),
-//         title: Joi.string().empty(''),
-//         firstName: Joi.string().empty(''),
-//         lastName: Joi.string().empty(''),
-//         password: Joi.string().min(6).empty(''),
-//         confirmPassword: Joi.string().valid(Joi.ref('password')).empty(''),
-//         gender: Joi.string().valid('Male', 'Female', 'Other').empty(''),
-//         location: Joi.string().empty(''),
-//         type: Joi.string().empty(''),
-//         bio: Joi.string().allow('', null),
-//         graduationYear: Joi.string().allow('', null),
-//         degree: Joi.string().allow('', null),
-//         photos: Joi.array().items(Joi.string()).optional()
-//     }).with('password', 'confirmPassword');
 
-//     validateRequest(req, next, schema);
-// }
 
 function update(req, res, next) {
     if (req.params.id !== req.user.id && req.user.role !== Role.Admin) {
@@ -369,36 +329,7 @@ function update(req, res, next) {
 }
 
 
-// function update(req, res, next) {
-//     if (req.params.id !== req.user.id && req.user.role !== Role.Admin) {
-//         return res.status(401).json({ message: 'Unauthorized' });
-//     }
 
-//     // 👇 Confirm incoming body and files
-//     console.log('🛠 Incoming update body:', req.body);
-//     // console.log('📸 Uploaded photos:', req.files);
-
-//     // Add photo paths if files are uploaded
-//     // if (req.files && req.files.length > 0) {
-//     //     const photoPaths = req.files.map(file => `/uploads/${file.filename}`);
-//     //     req.body.photos = photoPaths;
-//     // }
-
-//     // 🔍 Manually parse and validate interests if sent as stringified JSON
-//     if (req.body.interests && typeof req.body.interests === 'string') {
-//         try {
-//             req.body.interests = JSON.parse(req.body.interests);
-//         } catch (err) {
-//             return res.status(400).json({ message: 'Invalid interests format' });
-//         }
-//     }
-
-//     // Skip Joi validation for now — can be added later once body parsing works
-
-//     accountService.update(req.params.id, req.body)
-//         .then(account => res.json({ user: account })) // ✅ send user object for frontend
-//         .catch(next);
-// }
 
 
 
