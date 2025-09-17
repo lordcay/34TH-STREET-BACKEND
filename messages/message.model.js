@@ -13,4 +13,8 @@ const schema = new Schema({
 
 });
 
+schema.index({ senderId: 1, recipientId: 1, timestamp: 1 });
+schema.index({ recipientId: 1, read: 1, timestamp: 1 });
+
+
 module.exports = mongoose.model('Message', schema);

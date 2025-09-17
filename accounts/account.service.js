@@ -1,6 +1,6 @@
 ﻿
 
-const config = require('config.js');
+const config = require('config.json');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -71,45 +71,6 @@ async function revokeToken({ token, ipAddress }) {
     throw 'Not implemented';
 }
 
-// 🆕 REGISTRATION
-
-// async function register(params, origin) {
-//     try {
-//         // Validate if email already exists
-//         const existingUser = await db.Account.findOne({ email: params.email });
-//         if (existingUser) {
-//             console.log("User already registered:", params.email);
-//             return await sendAlreadyRegisteredEmail(params.email, origin);
-//         }
-
-//         // Create new account
-//         const account = new Account(params);
-
-//         // First registered user becomes admin
-//         const isFirstAccount = (await Account.countDocuments({})) === 0;
-//         account.role = isFirstAccount ? Role.Admin : Role.User;
-
-//         //  Generate 6-digit OTP and store it
-//         account.verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
-
-//         // Hash password
-//         account.passwordHash = hash(params.password);
-
-//         // Save account
-//         await account.save();
-
-//         console.log(` User registered successfully: ${account.email}, OTP: ${account.verificationToken}`);
-
-//         // Send verification email with the OTP
-//         await sendVerificationEmail(account, origin);
-
-//         //  Return the created user object
-//         return account;
-//     } catch (error) {
-//         console.error(" Error registering user:", error);
-//         throw new Error("User registration failed");
-//     }
-// }
 async function register(params, origin) {
     try {
         const existingUser = await Account.findOne({ email: params.email })
@@ -145,18 +106,7 @@ async function register(params, origin) {
     }
 
 }
-// async function register(params, origin) {
-//     if (await Account.findOne({ email: params.email })) {
-//         throw 'Email "' + params.email + '" is already registered';
-//     }
 
-//     const account = new Account(params);
-//     account.verificationToken = randomTokenString();
-//     account.passwordHash = bcrypt.hashSync(params.password, 10);
-//     await account.save();
-//     await sendVerificationEmail(account, origin);
-//     return account;
-// }
 
 async function verifyEmail({ token }) {
     const account = await Account.findOne({ verificationToken: token });
@@ -166,14 +116,7 @@ async function verifyEmail({ token }) {
     await account.save();
 }
 
-// async function forgotPassword({ email }, origin) {
-//     const account = await Account.findOne({ email });
-//     if (!account) return;
 
-//     account.resetToken = {
-//         token: randomTokenString(),
-//         expires: new Date(Date.now() + 24 * 60 * 60 * 1000)
-//     };
 
 async function forgotPassword({ email }, origin) {
     const account = await Account.findOne({ email });
@@ -197,34 +140,13 @@ async function forgotPassword({ email }, origin) {
 
 
 
-// await account.save();
-
-// await sendPasswordResetEmail(account, origin);
-// }
-
+//
 async function validateResetToken({ token }) {
     const account = await Account.findOne({ 'resetToken.token': token });
     if (!account || account.resetToken.expires < Date.now()) throw 'Invalid token';
 }
 
-// async function resetPassword({ token, password }) {
-//     const account = await Account.findOne({ 'resetToken.token': token });
 
-//     if (!account) {
-//         throw { status: 400, message: 'Invalid or expired reset code.' };
-//     }
-
-//     if (account.resetToken.expires < Date.now()) {
-//         throw { status: 400, message: 'Reset code has expired. Please request a new one.' };
-//     }
-
-//     // Prevent reuse by removing the token
-//     account.passwordHash = bcrypt.hashSync(password, 10);
-//     account.passwordReset = Date.now();
-//     account.resetToken = undefined;
-
-//     await account.save();
-// }
 
 
 async function resetPassword({ token, password }) {
@@ -274,16 +196,7 @@ async function create(params) {
     return basicDetails(account);
 }
 
-// async function create(params) {
-//     if (await Account.findOne({ email: params.email })) {
-//         throw 'Email "' + params.email + '" is already taken';
-//     }
 
-//     const account = new Account(params);
-//     account.passwordHash = bcrypt.hashSync(params.password, 10);
-//     await account.save();
-//     return basicDetails(account);
-// }
 
 async function update(id, params) {
     const account = await Account.findById(id);
@@ -316,9 +229,9 @@ async function _delete(id) {
 
 // ⚙️ Helper Functions
 
-function generateJwtToken(account) {
-    return jwt.sign({ id: account.id }, config.JWT_SECRET, { expiresIn: '7d' });
-}
+// function generateJwtToken(account) {
+//     return jwt.sign({ id: account.id }, config.JWT_SECRET, { expiresIn: '7d' });
+// }
 
 function generateRefreshToken(account, ipAddress) {
     return new Token({
@@ -348,15 +261,7 @@ function basicDetails(account) {
         nickname, DOB, languages, fieldOfStudy, graduationYear,
         industry, currentRole, linkedIn, funFact, rship
     };
-    // const {
-    //     id, title, firstName, lastName, email, gender, location,
-    //     type, created, updated, verified, interests, bio, phone, photos
-    // } = account;
-
-    // return {
-    //     id, title, firstName, lastName, email, gender, location,
-    //     type, created, updated, verified, interests, bio, phone, photos
-    // };
+    
 }
 
 
