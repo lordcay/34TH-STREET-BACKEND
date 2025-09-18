@@ -1,5 +1,9 @@
+
+
+// // message.controller.js
 // const messageService = require('./message.service');
 // const db = require('_helpers/db');
+// const { sendExpoPush } = require('./utils/push'); // ← add this import
 
 
 // module.exports = {
@@ -29,11 +33,11 @@
 //     const io = req.app.get('io');
 //     const connectedUsers = req.app.get('connectedUsers');
 
-//     // A) Direct-to-socket (legacy) — used anywhere in app
+//     // ✅ A) Direct-to-socket (only the recipient hears/gets it)
 //     const recipientSocketId = connectedUsers?.[recipientId];
 //     if (recipientSocketId) {
 //       io.to(recipientSocketId).emit('newMessage', {
-//         // keep old shape, but include name + preview so your toast has data
+//         // keep old shape, but include meta so your toast has data
 //         message: created,
 //         meta: {
 //           kind: 'dm',
@@ -42,16 +46,40 @@
 //           preview,
 //         }
 //       });
-//     }
+// const room = makePairKey(senderId, recipientId);
 
-//     // B) Room broadcast (preferred in PrivateChatScreen)
-//     // Include senderName inline so receivers don't see "undefined"
-//     const room = makePairKey(senderId, recipientId);
-//     const payloadForRoom = {
-//       ...(created.toObject ? created.toObject() : created),
-//       senderName,
-//     };
-//     io.to(room).emit('message:new', payloadForRoom);
+// // let the chat list update its lastMessage/ts and bump unread for the recipient
+// io.to(room).emit('conversation:update', {
+//   peerA: senderId,
+//   peerB: recipientId,
+//   lastMessage: preview,
+//   timestamp: created.timestamp || Date.now(),
+//   unreadBumpFor: recipientId
+// });
+
+//     }
+// try {
+//       const recipient = await db.Account.findById(recipientId).lean().exec();
+//       const recipientPushToken = recipient?.expoPushToken || recipient?.pushToken; // adjust to your schema
+//       if (recipientPushToken) {
+//         await sendExpoPush({
+//           to: recipientPushToken,
+//           sound: 'default',
+//           title: `New message from ${senderName}`,
+//           body: preview,
+//           data: {
+//             kind: 'dm',
+//             senderId,
+//             senderName,
+//             otherUserId: senderId,
+//             preview,
+//           },
+//         });
+//       }
+//     } catch (e) {
+//       console.error('Failed to send Expo push:', e?.message || e);
+//     }
+   
 
 //     // 4) Respond
 //     res.json(created);
@@ -60,23 +88,21 @@
 //   }
 // }
 
-
-
-
-
 // async function getMessages(req, res, next) {
 //   try {
 //     const currentUserId = req.user.id;
 //     const otherUserId = req.params.userId;
 //     const messages = await messageService.getMessagesBetweenUsers(currentUserId, otherUserId);
+
+//     // It's fine to keep read receipt room emits here
 //     const io = req.app.get('io');
 //     const room = `dm:${[String(currentUserId), String(otherUserId)].sort().join('_')}`;
 //     io.to(room).emit('message:read', { readerId: currentUserId, otherId: otherUserId });
 //     io.to(room).emit('conversation:update', {
-//   peerA: currentUserId,
-//   peerB: otherUserId,
-//   unreadResetFor: currentUserId
-// });
+//       peerA: currentUserId,
+//       peerB: otherUserId,
+//       unreadResetFor: currentUserId
+//     });
 
 //     res.json(messages);
 //   } catch (err) {
@@ -95,16 +121,15 @@
 // }
 
 
-// message.controller.js
+// messages/message.controller.js
 const messageService = require('./message.service');
 const db = require('_helpers/db');
-const { sendExpoPush } = require('./utils/push'); // ← add this import
-
+const { sendExpoPush } = require('./utils/push');
 
 module.exports = {
   sendMessage,
   getMessages,
-  getConversations
+  getConversations,
 };
 
 function makePairKey(a, b) {
@@ -120,31 +145,59 @@ async function sendMessage(req, res, next) {
     // 1) Persist
     const created = await messageService.create({ senderId, recipientId, message });
 
-    // 2) Derive senderName + preview (safe fallbacks)
-    const senderName = [req.user?.firstName, req.user?.lastName].filter(Boolean).join(' ').trim() || 'Someone';
+    // 1b) Ensure consistent populated payload (keeps client shape uniform)
+    const saved =
+      (messageService.findByIdPopulated
+        ? await messageService.findByIdPopulated(created._id)
+        : null) || created;
+
+    // 2) Derive meta
+    const senderName =
+      [req.user?.firstName, req.user?.lastName].filter(Boolean).join(' ').trim() || 'Someone';
     const preview = (message || '').toString().slice(0, 80);
 
-    // 3) Wire up socket
+    // 3) Sockets
     const io = req.app.get('io');
     const connectedUsers = req.app.get('connectedUsers');
+    const room = makePairKey(senderId, recipientId);
 
-    // ✅ A) Direct-to-socket (only the recipient hears/gets it)
+    // A) Direct notify recipient
     const recipientSocketId = connectedUsers?.[recipientId];
     if (recipientSocketId) {
       io.to(recipientSocketId).emit('newMessage', {
-        // keep old shape, but include meta so your toast has data
-        message: created,
+        message: saved, // populated for consistent client shape
         meta: {
           kind: 'dm',
-          senderId,
+          senderId: String(senderId),
           senderName,
           preview,
-        }
+        },
       });
+
+      // Bump conversation row in the DM room
+       const senderSocketId    = connectedUsers?.[senderId];
+    const payload = {
+      peerA: String(senderId),
+      peerB: String(recipientId),
+      lastMessage: preview,
+      timestamp: saved?.timestamp || Date.now(),
+      unreadBumpFor: String(recipientId), // recipient gets 1
+    };
+    if (senderSocketId)    io.to(senderSocketId).emit('conversation:update', payload);
+    if (recipientSocketId) io.to(recipientSocketId).emit('conversation:update', payload);
+      // io.to(room).emit('conversation:update', {
+      //   peerA: String(senderId),
+      //   peerB: String(recipientId),
+      //   lastMessage: preview,
+      //   timestamp: saved?.timestamp || Date.now(), // keep your 'timestamp' field
+      //   unreadBumpFor: String(recipientId),
+      // });
     }
-try {
+
+    // 4) Push notification (best effort)
+    try {
       const recipient = await db.Account.findById(recipientId).lean().exec();
-      const recipientPushToken = recipient?.expoPushToken || recipient?.pushToken; // adjust to your schema
+      const recipientPushToken = recipient?.expoPushToken || recipient?.pushToken;
       if (recipientPushToken) {
         await sendExpoPush({
           to: recipientPushToken,
@@ -153,9 +206,9 @@ try {
           body: preview,
           data: {
             kind: 'dm',
-            senderId,
+            senderId: String(senderId),
             senderName,
-            otherUserId: senderId,
+            otherUserId: String(senderId),
             preview,
           },
         });
@@ -163,10 +216,9 @@ try {
     } catch (e) {
       console.error('Failed to send Expo push:', e?.message || e);
     }
-   
 
-    // 4) Respond
-    res.json(created);
+    // 5) Respond
+    res.json(saved);
   } catch (err) {
     next(err);
   }
@@ -176,16 +228,23 @@ async function getMessages(req, res, next) {
   try {
     const currentUserId = req.user.id;
     const otherUserId = req.params.userId;
+
+    // Return populated messages for consistent client shape
     const messages = await messageService.getMessagesBetweenUsers(currentUserId, otherUserId);
 
-    // It's fine to keep read receipt room emits here
+    // Read + conversation updates for this DM room
     const io = req.app.get('io');
-    const room = `dm:${[String(currentUserId), String(otherUserId)].sort().join('_')}`;
-    io.to(room).emit('message:read', { readerId: currentUserId, otherId: otherUserId });
+    const room = makePairKey(currentUserId, otherUserId);
+
+    io.to(room).emit('message:read', {
+      readerId: String(currentUserId),
+      otherId: String(otherUserId),
+    });
+
     io.to(room).emit('conversation:update', {
-      peerA: currentUserId,
-      peerB: otherUserId,
-      unreadResetFor: currentUserId
+      peerA: String(currentUserId),
+      peerB: String(otherUserId),
+      unreadResetFor: String(currentUserId),
     });
 
     res.json(messages);

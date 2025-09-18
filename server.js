@@ -122,15 +122,7 @@ socket.on('stopTyping', ({ chatroomId, userId, senderName }) => {
 });
 
 
-    // socket.on('typing', ({ chatroomId, userId }) => {
-    //     socket.to(chatroomId).emit('userTyping', { userId });
-    // });
-
-    // socket.on('stopTyping', ({ chatroomId, userId }) => {
-    //     socket.to(chatroomId).emit('userStoppedTyping', { userId });
-    // });
-
-    // Read receipts (for private chats)
+   
 
     socket.on('readMessages', async ({ readerId, senderId }) => {
   try {
@@ -155,22 +147,7 @@ socket.on('stopTyping', ({ chatroomId, userId, senderName }) => {
   }
 });
 
-    // socket.on('readMessages', async ({ readerId, senderId }) => {
-    //     try {
-    //         await Message.updateMany(
-    //             { senderId, recipientId: readerId, read: false },
-    //             { $set: { read: true } }
-    //         );
-
-    //         const senderSocketId = connectedUsers[senderId];
-    //         if (senderSocketId) {
-    //             io.to(senderSocketId).emit('messagesRead', { from: readerId });
-    //             console.log(`📬 Read receipt sent to user ${senderId}`);
-    //         }
-    //     } catch (error) {
-    //         console.error('❌ Failed to mark messages as read:', error);
-    //     }
-    // });
+   
 
     socket.on('disconnect', () => {
         console.log('🔴 Socket disconnected:', socket.id);
