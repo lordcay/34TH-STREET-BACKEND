@@ -10,5 +10,9 @@
             "user": "Info@34thstreet.net",
             "pass": "Nche@2025"
         }
-    }
+    },
+
+    "REPORT_EMAIL": "Info@34thstreet.net",
+  "REPORT_EMAIL_PASSWORD": "Nche@2025",
+  "ADMIN_NOTIFICATION_EMAIL": "info@34thstreet.net"
 }

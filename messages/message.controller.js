@@ -125,6 +125,7 @@
 const messageService = require('./message.service');
 const db = require('_helpers/db');
 const { sendExpoPush } = require('./utils/push');
+const containsObjectionableContent = require('../utils/filterObjectionableContent');
 
 module.exports = {
   sendMessage,
@@ -141,6 +142,11 @@ async function sendMessage(req, res, next) {
   try {
     const senderId = req.user.id;
     const { recipientId, message } = req.body;
+
+    // 🚨 Filter objectionable content
+if (containsObjectionableContent(message)) {
+return res.status(400).json({ message: 'Message contains inappropriate content.' });
+}
 
     // 1) Persist
     const created = await messageService.create({ senderId, recipientId, message });
