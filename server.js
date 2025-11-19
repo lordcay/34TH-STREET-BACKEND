@@ -29,6 +29,10 @@ const db = require('./_helpers/db');
 const Message = db.Message;
 const ChatroomMessage = require('./chatroomMessages/chatroomMessage.model');
 const chatroomMessageRoutes = require('./chatroomMessages/chatroomMessage.routes');
+const reportRoutes = require('./reportUser/report.routes');
+const blockRoutes = require('./blockUser/block.routes');
+
+
 
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
@@ -45,6 +49,9 @@ app.use('/api', imageRoutes);
 app.use('/api-docs', require('_helpers/swagger'));
 app.use('/api/chatroom-messages', chatroomMessageRoutes);
 app.use(errorHandler);
+
+app.use('/reports', reportRoutes);
+app.use('/blocks', blockRoutes);
 
 // ✅ In-memory store for connected users
 const connectedUsers = {};
@@ -85,6 +92,13 @@ io.on('connection', (socket) => {
     };
 
     io.to(chatroomId).emit('newChatroomMessage', payload);
+
+     // 🔔 Also notify globally so users not joined to the room can bump badges
+ io.emit('chatroom:notify', {
+   chatroomId,
+   senderId,
+   messageId: newMessage._id, // optional, FYI
+ });
 
     // (optional) also notify room members individually via push — handled below in section C
   } catch (err) {

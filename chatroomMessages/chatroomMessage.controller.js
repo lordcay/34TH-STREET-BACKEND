@@ -3,11 +3,18 @@
 
 // chatroomMessage.controller.js
 const chatroomMessageService = require('./chatroomMessage.service');
+const containsObjectionableContent = require('../utils/filterObjectionableContent');
+
 
 async function sendMessage(req, res, next) {
     try {
         const { chatroomId, message, media, replyTo, avatarUrl, senderName } = req.body;
         const senderId = req.user.id;
+
+        // 🚫 Check for objectionable content
+        if (message && containsObjectionableContent(message)) {
+            return res.status(400).json({ message: 'Message contains inappropriate content' });
+        }
 
         const newMessage = await chatroomMessageService.createMessage({
             chatroomId,
