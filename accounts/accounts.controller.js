@@ -7,7 +7,7 @@ const Role = require('_helpers/role');
 const accountService = require('./account.service');
 const upload = require('../_middleware/upload');
 const jwt = require('jsonwebtoken');
-const config = require('../config.json');
+const config = require('../config.js');
 const Account = require('./account.model');
 const bcrypt = require('bcryptjs');
 const containsObjectionableContent = require('../utils/filterObjectionableContent');
@@ -46,7 +46,7 @@ router.delete('/:id', authorize(), _delete);
 module.exports = router;
 
 // const jwt = require('jsonwebtoken');
-// const config = require('../config.json'); // Load config.json
+// const config = require('../config.js'); // Load config.js
 
 function generateJwtToken(userId) {
     return jwt.sign({ userId: userId }, config.JWT_SECRET, { expiresIn: '7d' });
@@ -438,7 +438,7 @@ function setTokenCookie(res, token) {
 // const accountService = require('./account.service');
 // const upload = require('../_middleware/upload');
 // const jwt = require('jsonwebtoken');
-// const config = require('../config.json');
+// const config = require('../config.js');
 // const Account = require('./account.model');
 // const bcrypt = require('bcryptjs');
 // const containsObjectionableContent = require('../utils/filterObjectionableContent');
@@ -475,7 +475,7 @@ function setTokenCookie(res, token) {
 // module.exports = router;
 
 // // const jwt = require('jsonwebtoken');
-// // const config = require('../config.json'); // Load config.json
+// // const config = require('../config.js'); // Load config.js
 
 // function generateJwtToken(userId) {
 //     return jwt.sign({ userId: userId }, config.JWT_SECRET, { expiresIn: '7d' });
