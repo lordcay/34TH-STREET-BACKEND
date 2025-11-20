@@ -4,6 +4,8 @@
 // chatroomMessage.controller.js
 const chatroomMessageService = require('./chatroomMessage.service');
 const containsObjectionableContent = require('../utils/filterObjectionableContent');
+const Block = require('../blockUser/block.model'); // ✅ import the Block model
+
 
 
 async function sendMessage(req, res, next) {
@@ -15,6 +17,14 @@ async function sendMessage(req, res, next) {
         if (message && containsObjectionableContent(message)) {
             return res.status(400).json({ message: 'Message contains inappropriate content' });
         }
+
+        //  // 🚫 Check block list — see if anyone in the room has blocked this sender
+        // const participants = await chatroomMessageService.getChatroomParticipants(chatroomId);
+        // const blockedBy = await Block.findOne({ blocker: { $in: participants }, blocked: senderId });
+
+        // if (blockedBy) {
+        //     return res.status(403).json({ message: 'You are blocked by a user in this chatroom.' });
+        // }
 
         const newMessage = await chatroomMessageService.createMessage({
             chatroomId,
