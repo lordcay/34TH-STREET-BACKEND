@@ -126,6 +126,8 @@ const messageService = require('./message.service');
 const db = require('_helpers/db');
 const { sendExpoPush } = require('./utils/push');
 const containsObjectionableContent = require('../utils/filterObjectionableContent');
+const Block = require('../blockUser/block.model'); // import if not already
+
 
 module.exports = {
   sendMessage,
@@ -146,6 +148,19 @@ async function sendMessage(req, res, next) {
     // 🚨 Filter objectionable content
 if (containsObjectionableContent(message)) {
 return res.status(400).json({ message: 'Message contains inappropriate content.' });
+}
+
+// 🚫 Check block status (bidirectional)
+const isBlocked = await Block.findOne({
+$or: [
+{ blocker: senderId, blocked: recipientId },
+{ blocker: recipientId, blocked: senderId }
+]
+});
+
+
+if (isBlocked) {
+return res.status(403).json({ message: 'Messaging not allowed. One of the users has blocked the other.' });
 }
 
     // 1) Persist
