@@ -1,7 +1,7 @@
 
 
 
-const config = require('config.json');
+const config = require('config.js');
 const mongoose = require('mongoose');
 
 mongoose.connect(process.env.MONGODB_URI || config.connectionString);
