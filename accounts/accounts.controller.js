@@ -28,7 +28,7 @@ const Role = require('_helpers/role');
 const accountService = require('./account.service');
 const upload = require('../_middleware/upload');
 const jwt = require('jsonwebtoken');
-const config = require('../config.json');
+const config = require('../config.js');
 const Account = require('./account.model');
 const bcrypt = require('bcryptjs');
 const containsObjectionableContent = require('../utils/filterObjectionableContent');
@@ -68,7 +68,7 @@ module.exports = router;
 
 
 
-// const config = require('../config.json'); // Load config.json
+// const config = require('../config.js'); // Load config.js
 
 
 function sanitizeField(value) {
