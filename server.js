@@ -82,6 +82,13 @@ io.on('connection', (socket) => {
     // Send chatroom message (save and broadcast)
     socket.on('sendChatroomMessage', async ({ chatroomId, senderId, message, media, senderName, avatarUrl }) => {
   try {
+    // 🔥 1. OBJECTIONABLE CONTENT FILTER (same as DM logic)
+    const containsObjectionableContent = require('./utils/filterObjectionableContent');
+    if (message && containsObjectionableContent(message)) {
+      return io.to(socket.id).emit('chatroom:error', {
+        message: 'Message contains inappropriate content.',
+      });
+    }
     const newMessage = await ChatroomMessage.create({
       chatroomId, senderId, message, media, readBy: [senderId], senderName, avatarUrl
     });
