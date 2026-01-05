@@ -29,8 +29,12 @@ const schema = new Schema({
     linkedIn: { type: String },
     funFact: { type: String },
     rship: { type: String },
+    welcomeEmailSent: { type: Boolean, default: false },
+
 
     verificationToken: String,
+    verificationTokenExpires: Date,   // ✅ ADD THIS
+
     verified: Date,
     resetToken: {
         token: String,
