@@ -48,6 +48,7 @@ app.use('/uploads', express.static('uploads'));
 app.use('/api', imageRoutes);
 app.use('/api-docs', require('_helpers/swagger'));
 app.use('/api/chatroom-messages', chatroomMessageRoutes);
+app.use('/feed', require('./feed/feed.routes'));
 app.use(errorHandler);
 
 app.use('/reports', reportRoutes);

@@ -30,6 +30,8 @@ const schema = new Schema({
     funFact: { type: String },
     rship: { type: String },
     welcomeEmailSent: { type: Boolean, default: false },
+    role: { type: String, required: true, default: 'User' },
+
 
 
     verificationToken: String,
