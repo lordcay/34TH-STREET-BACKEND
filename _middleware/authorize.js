@@ -1,6 +1,6 @@
  const jwt = require('express-jwt');
 
-const config = require('config.json');
+const config = require('config.js');
 const db = require('_helpers/db');
 
 module.exports = authorize;
@@ -63,7 +63,7 @@ console.log("👤 Account role:", account?.role);
 
 
 // const jwt = require('express-jwt');
-// const config = require('config.json');
+// const config = require('config.js');
 // const db = require('_helpers/db');
 
 // module.exports = authorize;
