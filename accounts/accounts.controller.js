@@ -25,6 +25,8 @@ router.post('/validate-reset-token', validateResetTokenSchema, validateResetToke
 router.post('/reset-password', resetPasswordSchema, resetPassword);
 router.get('/', authorize(Role.Admin), getAll);
 router.get('/verified', authorize(), getVerifiedUsers);
+router.put('/me/location', authorize(), updateMyLocation);
+
 router.get('/:id', authorize(), getById);
 router.post('/push-token', authorize(), savePushToken);
 
@@ -310,6 +312,9 @@ function updateSchema(req, res, next) {
         phone: Joi.string().allow('', null),
         origin: Joi.string().allow('', null),
         nickname: Joi.string().allow('', null),
+        currentCity: Joi.string().allow('', null),
+locationUpdatedAt: Joi.date().allow(null),
+
         DOB: Joi.date().allow(null),
         languages: Joi.alternatives().try(Joi.array().items(Joi.string()), Joi.string()),
         interests: Joi.alternatives().try(Joi.array().items(Joi.string()), Joi.string()),
@@ -320,6 +325,44 @@ function updateSchema(req, res, next) {
 }
 
 
+async function updateMyLocation(req, res, next) {
+  try {
+    const userId = req.user?.id; // must exist from authorize middleware
+
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized: missing user id in token' });
+    }
+
+    let { currentCity, locationUpdatedAt } = req.body;
+
+        console.log('📍 updateMyLocation:', { userId, currentCity });
+
+
+    // Normalize city
+    currentCity = typeof currentCity === 'string' ? currentCity.trim() : '';
+
+    if (!currentCity) {
+      return res.status(400).json({ message: 'currentCity is required' });
+    }
+
+    // ✅ sanitize city too
+    currentCity = sanitizeField(currentCity);
+
+    const payload = {
+      currentCity,
+      locationUpdatedAt: locationUpdatedAt ? new Date(locationUpdatedAt) : new Date(),
+    };
+
+    const updated = await accountService.update(userId, payload);
+
+    // ✅ return the same shape your frontend expects elsewhere
+    return res.json({ user: updated });
+
+  } catch (err) {
+    next(err);
+  }
+}
 
 
 function update(req, res, next) {
@@ -340,7 +383,7 @@ function update(req, res, next) {
         "firstName", "lastName", "nickname", "bio",
         "funFact", "currentRole", "industry",
         "fieldOfStudy", "origin", "type",
-        "rship", "phone"
+        "rship", "phone", "currentCity"
     ];
 
     textFields.forEach(field => {

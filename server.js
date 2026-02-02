@@ -37,7 +37,15 @@ const blockRoutes = require('./blockUser/block.routes');
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use(cookieParser());
-app.use(cors({ origin: (origin, callback) => callback(null, true), credentials: true }));
+// app.use(cors({ origin: (origin, callback) => callback(null, true), credentials: true }));
+
+app.use(
+  cors({
+    origin: ['http://localhost:3000'],
+    credentials: true,
+  })
+);
+
 
 // Routes
 app.use('/accounts', require('./accounts/accounts.controller'));
@@ -49,10 +57,11 @@ app.use('/api', imageRoutes);
 app.use('/api-docs', require('_helpers/swagger'));
 app.use('/api/chatroom-messages', chatroomMessageRoutes);
 app.use('/feed', require('./feed/feed.routes'));
-app.use(errorHandler);
 
 app.use('/reports', reportRoutes);
 app.use('/blocks', blockRoutes);
+app.use(errorHandler);
+
 
 // ✅ In-memory store for connected users
 const connectedUsers = {};
@@ -114,24 +123,7 @@ io.on('connection', (socket) => {
   }
 });
 
-    // socket.on('sendChatroomMessage', async ({ chatroomId, senderId, message, media, senderName, avatarUrl }) => {
-    //     try {
-    //         const newMessage = await ChatroomMessage.create({
-    //             chatroomId,
-    //             senderId,
-    //             message,
-    //             media,
-    //             readBy: [senderId],
-    //             senderName,
-    //             avatarUrl
-    //         });
-
-    //         io.to(chatroomId).emit('newChatroomMessage', newMessage);
-    //         console.log(`💬 Message sent to chatroom ${chatroomId}`);
-    //     } catch (err) {
-    //         console.error('❌ Error sending chatroom message:', err);
-    //     }
-    // });
+  
 
     // Typing indicators
 // Typing indicators

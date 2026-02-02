@@ -118,13 +118,7 @@ async function register(params, origin) {
 
 
 
-// async function verifyEmail({ token }) {
-//     const account = await Account.findOne({ verificationToken: token });
-//     if (!account) throw 'Verification failed';
-//     account.verified = Date.now();
-//     account.verificationToken = undefined;
-//     await account.save();
-// }
+
 
 
 async function verifyEmail({ token }) {
@@ -163,29 +157,7 @@ async function verifyEmail({ token }) {
 }
 
 
-// async function verifyEmail({ token }) {
-//   const account = await Account.findOne({ verificationToken: token });
-//   if (!account) throw 'Verification failed';
 
-//   // ✅ mark verified
-//   account.verified = Date.now();
-//   account.verificationToken = undefined;
-//   account.verificationTokenExpires = undefined;
-
-//   await account.save();
-
-//   // ✅ Send welcome email once (do NOT block verification if email fails)
-//   if (!account.welcomeEmailSent) {
-//     try {
-//       await sendWelcomeEmail(account);
-//       account.welcomeEmailSent = true;
-//       await account.save();
-//     } catch (err) {
-//       console.error('Welcome email failed:', err?.message || err);
-//       // don't throw — verification should still succeed
-//     }
-//   }
-// }
 
 
 
@@ -242,40 +214,6 @@ async function sendWelcomeEmail(account) {
   });
 }
 
-
-// async function sendWelcomeEmail(account) {
-//   const name = account.firstName ? ` ${account.firstName}` : '';
-//   const html = `
-//     <div style="font-family: Arial, sans-serif; line-height: 1.6; color:#222;">
-//       <h2 style="color:#581845;">Hi${name} 🎉</h2>
-
-//       <p> Welcome to the 34th Street </p>
-
-//       <p> You’re officially part of a private, verified community of Africans professionals from top schools across the globe. </p>
-
-//       <p>Take a moment to complete your profile, explore the chat rooms, discover and connect with people from other schools/programs, and join conversations that speak to you. </p>
-
-//       <p>As we say back home, “the road opens when you begin to walk.” </p>
-
-//       <p style="margin-top:18px;">Warmly,<br/> See you on the Street!!!</p>
-
-//       <p> For Technical Support/ feedback, click the link below </p>
-
-//       <p><a href="https://34thstreet.net/app-support/">https://34thstreet.net/app-support/</a></p>
-
-
-      
-
-      
-//     </div>
-//   `;
-
-//   await sendEmail({
-//     to: account.email,
-//     subject: 'Welcome to 34th Street 🎉',
-//     html,
-//   });
-// }
 
 
 
@@ -335,32 +273,43 @@ async function create(params) {
     return basicDetails(account);
 }
 
-
-
 async function update(id, params) {
-    const account = await Account.findById(id);
-    if (!account) throw 'Account not found';
+  const account = await Account.findById(id);
+  if (!account) throw 'Account not found';
 
-    // 🧠 Convert stringified interests to array
-    if (typeof params.interests === 'string') {
-        try {
-            params.interests = JSON.parse(params.interests);
-        } catch (err) {
-            console.error('❌ Failed to parse interests:', err.message);
-            params.interests = [];
-        }
+  // Convert stringified interests to array
+  if (typeof params.interests === 'string') {
+    try {
+      params.interests = JSON.parse(params.interests);
+    } catch (err) {
+      console.error('❌ Failed to parse interests:', err.message);
+      params.interests = [];
     }
+  }
 
-    // 🔥 Update fields
-    Object.assign(account, {
-        ...params,
-        updated: new Date()
-    });
+  // ✅ Whitelist fields that users are allowed to update
+  const allowed = [
+    'title', 'firstName', 'lastName', 'nickname', 'phone', 'origin',
+    'bio', 'interests', 'photos', 'languages', 'fieldOfStudy',
+    'graduationYear', 'industry', 'currentRole', 'linkedIn', 'funFact',
+    'rship',
+    // ✅ location fields
+    'currentCity', 'locationUpdatedAt', 'locationSharingEnabled',
 
-    await account.save();
+  ];
 
-    return account; // ✅ Return full updated object
+  for (const key of allowed) {
+    if (key in params) account[key] = params[key];
+  }
+
+  account.updated = new Date();
+  await account.save();
+
+  return account; // keep returning full account like you do
 }
+
+
+
 
 async function _delete(id) {
     await Account.findByIdAndDelete(id);
@@ -368,9 +317,7 @@ async function _delete(id) {
 
 // ⚙️ Helper Functions
 
-// function generateJwtToken(account) {
-//     return jwt.sign({ id: account.id }, config.JWT_SECRET, { expiresIn: '7d' });
-// }
+
 
 function generateRefreshToken(account, ipAddress) {
     return new Token({
@@ -391,14 +338,23 @@ function basicDetails(account) {
         id, title, firstName, lastName, email, gender, type,
         phone, origin, bio, interests, photos, created, updated, verified,
         nickname, DOB, languages, fieldOfStudy, graduationYear,
-        industry, currentRole, linkedIn, funFact, rship
+        industry, currentRole, linkedIn, funFact, rship, currentCity,
+    locationUpdatedAt, locationSharingEnabled,
+
     } = account;
+
+      const share = locationSharingEnabled !== false;
+
 
     return {
         id, title, firstName, lastName, email, gender, type,
         phone, origin, bio, interests, photos, created, updated, verified,
         nickname, DOB, languages, fieldOfStudy, graduationYear,
-        industry, currentRole, linkedIn, funFact, rship
+        industry, currentRole, linkedIn, funFact, rship, currentCity,
+    locationUpdatedAt, locationSharingEnabled, 
+    currentCity: share ? (currentCity || '') : '',
+    locationUpdatedAt: share ? locationUpdatedAt : null,
+
     };
     
 }

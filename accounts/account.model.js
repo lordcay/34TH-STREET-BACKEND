@@ -12,6 +12,10 @@ const schema = new Schema({
     lastName: { type: String, required: true },
     gender: { type: String, required: true },
     type: { type: String, required: true },
+currentCity: { type: String, default: '' },
+locationUpdatedAt: { type: Date, default: null },
+locationSharingEnabled: { type: Boolean, default: true },
+
 
     // New Fields
     nickname: { type: String },

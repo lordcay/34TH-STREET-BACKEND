@@ -1,5 +1,9 @@
 const db = require('../_helpers/db');
+const mongoose = require('mongoose');
+
 const filterObjectionableContent = require('../utils/filterObjectionableContent'); // you already have this
+
+
 
 const getDayKey = (d = new Date()) => {
   const y = d.getFullYear();
@@ -70,80 +74,126 @@ async function createToday(params, adminId) {
 async function vote(postId, userId, type) {
   if (!['agree', 'disagree'].includes(type)) throw 'Invalid vote type';
 
-  const post = await db.Feed.findById(postId);
-  if (!post) throw 'Post not found';
+const session = await mongoose.startSession();
 
-  // already voted?
-  const existing = await db.FeedVote.findOne({ post: postId, user: userId });
+  try {
+    let result = null;
 
-  // Same vote => remove
-//   if (existing && existing.type === type) {
-//     await db.FeedVote.deleteOne({ _id: existing._id });
+    await session.withTransaction(async () => {
+      const post = await db.Feed.findById(postId).session(session);
+      if (!post) throw 'Post not found';
 
-//     const inc = type === 'agree' ? { agreeCount: -1 } : { disagreeCount: -1 };
-//     await db.Feed.updateOne({ _id: postId }, { $inc: inc });
+      // Find existing vote in this transaction
+      const existing = await db.FeedVote.findOne({ post: postId, user: userId }).session(session);
 
-//     return { myVote: null };
-//   }
+      let deltaAgree = 0;
+      let deltaDisagree = 0;
+      let myVote = type;
 
-if (existing && existing.type === type) {
-  await db.FeedVote.deleteOne({ _id: existing._id });
+      // ✅ Case 1: Tap same vote again => toggle off (delete vote)
+      if (existing && existing.type === type) {
+        await db.FeedVote.deleteOne({ _id: existing._id }).session(session);
 
-  const inc = type === 'agree' ? { agreeCount: -1 } : { disagreeCount: -1 };
-  await db.Feed.updateOne({ _id: postId }, { $inc: inc });
+        if (type === 'agree') deltaAgree = -1;
+        if (type === 'disagree') deltaDisagree = -1;
 
-  const updatedPost = await db.Feed.findById(postId);
-  return { post: updatedPost, myVote: null };
+        myVote = null;
+      }
+
+      // ✅ Case 2: Switch vote (agree -> disagree OR disagree -> agree)
+      else if (existing && existing.type !== type) {
+        const oldType = existing.type;
+
+        existing.type = type;
+        await existing.save({ session });
+
+        // remove old
+        if (oldType === 'agree') deltaAgree = -1;
+        if (oldType === 'disagree') deltaDisagree = -1;
+
+        // add new
+        if (type === 'agree') deltaAgree += 1;
+        if (type === 'disagree') deltaDisagree += 1;
+
+        myVote = type;
+      }
+
+     // ✅ Case 3: New vote
+else if (!existing) {
+  let createdNew = false;
+
+  try {
+    await db.FeedVote.create([{ post: postId, user: userId, type }], { session });
+    createdNew = true;
+    myVote = type;
+
+    // new vote => +1 on that type
+    if (type === 'agree') deltaAgree = 1;
+    if (type === 'disagree') deltaDisagree = 1;
+  } catch (e) {
+    // If two requests race, unique index can throw E11000
+    if (String(e?.code) === '11000') {
+      const v2 = await db.FeedVote.findOne({ post: postId, user: userId }).session(session);
+
+      if (v2 && v2.type === type) {
+        // toggle off
+        await db.FeedVote.deleteOne({ _id: v2._id }).session(session);
+        if (type === 'agree') deltaAgree = -1;
+        if (type === 'disagree') deltaDisagree = -1;
+        myVote = null;
+      } else if (v2 && v2.type !== type) {
+        // switch
+        const oldType = v2.type;
+        v2.type = type;
+        await v2.save({ session });
+
+        if (oldType === 'agree') deltaAgree = -1;
+        if (oldType === 'disagree') deltaDisagree = -1;
+
+        if (type === 'agree') deltaAgree += 1;
+        if (type === 'disagree') deltaDisagree += 1;
+
+        myVote = type;
+      } else {
+        // super edge case: can't find it after duplicate
+        myVote = null;
+      }
+    } else {
+      throw e;
+    }
+  }
 }
 
 
-  // Switch vote or create new
-  if (existing && existing.type !== type) {
-    // update vote
-    existing.type = type;
-    await existing.save();
+      // ✅ Apply count changes + clamp to prevent negatives
+      // Using aggregation pipeline update so we can do $max(0, count + delta)
+      if (deltaAgree !== 0 || deltaDisagree !== 0) {
+        await db.Feed.updateOne(
+          { _id: postId },
+          [
+            {
+              $set: {
+                agreeCount: { $max: [0, { $add: ['$agreeCount', deltaAgree] }] },
+                disagreeCount: { $max: [0, { $add: ['$disagreeCount', deltaDisagree] }] },
+              },
+            },
+          ],
+          { session }
+        );
+      }
 
-    // adjust counts: -old +new
-    const dec = existing.type === 'agree' ? { disagreeCount: -1 } : { agreeCount: -1 }; // careful: existing.type now changed
-    // We need oldType before overwrite:
+      const updatedPost = await db.Feed.findById(postId).session(session);
+      result = { post: updatedPost, myVote };
+    });
+
+    return result;
+  } finally {
+    session.endSession();
   }
-
-  // handle switch safely:
-  if (existing) {
-    const oldType = existing.type;
-    existing.type = type;
-    await existing.save();
-
-    const inc = {};
-    if (oldType === 'agree') inc.agreeCount = -1;
-    if (oldType === 'disagree') inc.disagreeCount = -1;
-    if (type === 'agree') inc.agreeCount = (inc.agreeCount || 0) + 1;
-    if (type === 'disagree') inc.disagreeCount = (inc.disagreeCount || 0) + 1;
-
-   await db.Feed.updateOne({ _id: postId }, { $inc: inc });
-
-const updatedPost = await db.Feed.findById(postId);
-return { post: updatedPost, myVote: type };
-
-  }
-
-  // create new vote
-  await db.FeedVote.create({ post: postId, user: userId, type });
-
-  const inc = type === 'agree' ? { agreeCount: 1 } : { disagreeCount: 1 };
-await db.Feed.updateOne({ _id: postId }, { $inc: inc });
-
-const updatedPost = await db.Feed.findById(postId);
-return { post: updatedPost, myVote: type };
-
-
-//   const inc = type === 'agree' ? { agreeCount: 1 } : { disagreeCount: 1 };
-//   await db.Feed.updateOne({ _id: postId }, { $inc: inc });
-//   const updatedPost = await db.Feed.findById(postId);
-// return { post: updatedPost, myVote: type };
-
-//   return { myVote: type };
 }
+
+
+
 
 async function getComments(postId, limit = 50) {
   const post = await db.Feed.findById(postId);
