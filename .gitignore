@@ -44,5 +44,5 @@ config.json
 config.*.json
 
 # uploads (optional)
-uploads/
+# uploads/
 
