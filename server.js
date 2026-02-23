@@ -39,12 +39,28 @@ app.use(bodyParser.json());
 app.use(cookieParser());
 // app.use(cors({ origin: (origin, callback) => callback(null, true), credentials: true }));
 
+
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'https://34thstreet-admin.pages.dev',
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: ['http://localhost:3000'],
+    origin: allowedOrigins,
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   })
 );
+// app.use(
+//   cors({
+//     origin: ['http://localhost:3000'],
+//     credentials: true,
+//   })
+// );
 
 
 // Routes
