@@ -130,19 +130,57 @@ module.exports = {
   create,
   getMessagesBetweenUsers,
   getUserConversations,
-  findByIdPopulated, // <- new helper for consistent controller responses
+  findByIdPopulated,
+  addReaction,
+  removeReaction,
+  deleteMessage,
+  deleteMessageForMe,
 };
 
-async function create({ senderId, recipientId, message }) {
-  const newMessage = new db.Message({ senderId, recipientId, message });
+async function create({ 
+  senderId, 
+  recipientId, 
+  message, 
+  replyTo = null,
+  // Media fields
+  messageType = 'text',
+  mediaUrl = null,
+  fileName = null,
+  fileSize = null,
+  mimeType = null,
+  duration = null,
+  thumbnail = null,
+  contactInfo = null,
+}) {
+  const newMessage = new db.Message({ 
+    senderId, 
+    recipientId, 
+    message: message || '',
+    replyTo: replyTo || null,
+    // Media fields
+    messageType,
+    mediaUrl,
+    fileName,
+    fileSize,
+    mimeType,
+    duration,
+    thumbnail,
+    contactInfo,
+  });
   await newMessage.save();
-  return newMessage; // controller may call findByIdPopulated for uniform shape
+  return newMessage;
 }
 
 async function findByIdPopulated(id) {
   return db.Message.findById(id)
     .populate('senderId', '_id firstName lastName photos')
     .populate('recipientId', '_id firstName lastName photos')
+    .populate({
+      path: 'replyTo',
+      select: '_id message senderId timestamp',
+      populate: { path: 'senderId', select: '_id firstName lastName' }
+    })
+    .populate('reactions.userId', '_id firstName lastName')
     .lean()
     .exec();
 }
@@ -150,17 +188,58 @@ async function findByIdPopulated(id) {
 async function getMessagesBetweenUsers(currentUserId, otherUserId) {
   await markMessagesAsRead(currentUserId, otherUserId);
 
-  return db.Message.find({
+  const messages = await db.Message.find({
     $or: [
       { senderId: currentUserId, recipientId: otherUserId },
       { senderId: otherUserId, recipientId: currentUserId },
     ],
+    // Filter out messages deleted for the current user
+    deletedForUsers: { $ne: currentUserId },
   })
     .populate('senderId', '_id firstName lastName photos')
     .populate('recipientId', '_id firstName lastName photos')
-    .sort({ timestamp: 1 }) // keep your existing 'timestamp'
+    .populate({
+      path: 'replyTo',
+      select: '_id message senderId timestamp deletedForEveryone',
+      populate: { path: 'senderId', select: '_id firstName lastName' }
+    })
+    .populate('reactions.userId', '_id firstName lastName')
+    .populate('deletedBy', '_id firstName lastName')
+    .sort({ timestamp: 1 })
     .lean()
     .exec();
+
+  return messages;
+}
+
+// Add or update a reaction
+async function addReaction(messageId, userId, emoji) {
+  const message = await db.Message.findById(messageId);
+  if (!message) throw new Error('Message not found');
+
+  // Remove existing reaction from this user (one reaction per user)
+  message.reactions = message.reactions.filter(
+    r => String(r.userId) !== String(userId)
+  );
+  
+  // Add new reaction
+  message.reactions.push({ userId, emoji });
+  await message.save();
+  
+  return findByIdPopulated(messageId);
+}
+
+// Remove a reaction
+async function removeReaction(messageId, userId) {
+  const message = await db.Message.findById(messageId);
+  if (!message) throw new Error('Message not found');
+
+  message.reactions = message.reactions.filter(
+    r => String(r.userId) !== String(userId)
+  );
+  await message.save();
+  
+  return findByIdPopulated(messageId);
 }
 
 async function getUserConversations(currentUserId) {
@@ -244,4 +323,48 @@ async function markMessagesAsRead(currentUserId, otherUserId) {
     },
     { $set: { read: true } }
   );
+}
+
+// ─────────────────────────────────────────────────────────
+// Delete Message Functions (WhatsApp-style)
+// ─────────────────────────────────────────────────────────
+
+// Delete message for everyone (only sender can do this)
+async function deleteMessage(messageId, userId) {
+  const message = await db.Message.findById(messageId);
+  if (!message) throw new Error('Message not found');
+
+  // Only the sender can delete for everyone
+  if (String(message.senderId) !== String(userId)) {
+    throw new Error('You can only delete your own messages for everyone');
+  }
+
+  // Mark as deleted for everyone
+  message.deletedForEveryone = true;
+  message.deletedBy = userId;
+  await message.save();
+
+  return message;
+}
+
+// Delete message for me only
+async function deleteMessageForMe(messageId, userId) {
+  const message = await db.Message.findById(messageId);
+  if (!message) throw new Error('Message not found');
+
+  // Check if user is part of this conversation
+  const isSender = String(message.senderId) === String(userId);
+  const isRecipient = String(message.recipientId) === String(userId);
+  
+  if (!isSender && !isRecipient) {
+    throw new Error('You are not authorized to delete this message');
+  }
+
+  // Add user to deletedForUsers array if not already there
+  if (!message.deletedForUsers.includes(userId)) {
+    message.deletedForUsers.push(userId);
+  }
+  await message.save();
+
+  return message;
 }

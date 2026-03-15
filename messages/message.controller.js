@@ -133,6 +133,9 @@ module.exports = {
   sendMessage,
   getMessages,
   getConversations,
+  addReaction,
+  removeReaction,
+  deleteMessage,
 };
 
 function makePairKey(a, b) {
@@ -143,10 +146,23 @@ function makePairKey(a, b) {
 async function sendMessage(req, res, next) {
   try {
     const senderId = req.user.id;
-    const { recipientId, message } = req.body;
+    const { 
+      recipientId, 
+      message, 
+      replyTo,
+      // Media fields
+      messageType,
+      mediaUrl,
+      fileName,
+      fileSize,
+      mimeType,
+      duration,
+      thumbnail,
+      contactInfo,
+    } = req.body;
 
-    // 🚨 Filter objectionable content
-if (containsObjectionableContent(message)) {
+    // 🚨 Filter objectionable content (only for text messages)
+if (message && messageType !== 'contact' && containsObjectionableContent(message)) {
 return res.status(400).json({ message: 'Message contains inappropriate content.' });
 }
 
@@ -163,8 +179,21 @@ if (isBlocked) {
 return res.status(403).json({ message: 'Messaging not allowed. One of the users has blocked the other.' });
 }
 
-    // 1) Persist
-    const created = await messageService.create({ senderId, recipientId, message });
+    // 1) Persist (including media fields)
+    const created = await messageService.create({ 
+      senderId, 
+      recipientId, 
+      message, 
+      replyTo,
+      messageType,
+      mediaUrl,
+      fileName,
+      fileSize,
+      mimeType,
+      duration,
+      thumbnail,
+      contactInfo,
+    });
 
     // 1b) Ensure consistent populated payload (keeps client shape uniform)
     const saved =
@@ -173,9 +202,26 @@ return res.status(403).json({ message: 'Messaging not allowed. One of the users 
         : null) || created;
 
     // 2) Derive meta
-    const senderName =
-      [req.user?.firstName, req.user?.lastName].filter(Boolean).join(' ').trim() || 'Someone';
-    const preview = (message || '').toString().slice(0, 80);
+    // const senderName =
+    //   [req.user?.firstName, req.user?.lastName].filter(Boolean).join(' ').trim() || 'Someone';
+    // const preview = (message || '').toString().slice(0, 80);
+
+     const senderAccount = await db.Account.findById(senderId).select('firstName lastName').lean();
+    const senderName = [senderAccount?.firstName, senderAccount?.lastName].filter(Boolean).join(' ').trim() || 'Someone';
+    
+    // Generate preview based on message type
+    let preview;
+    if (messageType === 'image') {
+      preview = '📷 Photo';
+    } else if (messageType === 'audio') {
+      preview = '🎤 Voice message';
+    } else if (messageType === 'document') {
+      preview = `📄 ${fileName || 'Document'}`;
+    } else if (messageType === 'contact') {
+      preview = `👤 Contact: ${contactInfo?.name || 'Unknown'}`;
+    } else {
+      preview = (message || '').toString().slice(0, 80);
+    }
 
     // 3) Sockets
     const io = req.app.get('io');
@@ -280,6 +326,147 @@ async function getConversations(req, res, next) {
     const conversations = await messageService.getUserConversations(currentUserId);
     res.json(conversations);
   } catch (err) {
+    next(err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// Reaction handlers
+// ─────────────────────────────────────────────────────────
+async function addReaction(req, res, next) {
+  try {
+    const userId = req.user.id;
+    const { messageId } = req.params;
+    const { emoji } = req.body;
+
+    if (!emoji) {
+      return res.status(400).json({ message: 'Emoji is required' });
+    }
+
+    const updatedMessage = await messageService.addReaction(messageId, userId, emoji);
+    
+    // Emit socket event for real-time update
+    const io = req.app.get('io');
+    const connectedUsers = req.app.get('connectedUsers');
+    
+    // Notify both sender and recipient of the message
+    const senderId = String(updatedMessage.senderId?._id || updatedMessage.senderId);
+    const recipientId = String(updatedMessage.recipientId?._id || updatedMessage.recipientId);
+    
+    const reactionPayload = {
+      messageId,
+      reactions: updatedMessage.reactions,
+      addedBy: userId,
+      emoji,
+    };
+
+    const senderSocketId = connectedUsers?.[senderId];
+    const recipientSocketId = connectedUsers?.[recipientId];
+    
+    if (senderSocketId) io.to(senderSocketId).emit('message:reaction', reactionPayload);
+    if (recipientSocketId && recipientSocketId !== senderSocketId) {
+      io.to(recipientSocketId).emit('message:reaction', reactionPayload);
+    }
+
+    res.json(updatedMessage);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function removeReaction(req, res, next) {
+  try {
+    const userId = req.user.id;
+    const { messageId } = req.params;
+
+    const updatedMessage = await messageService.removeReaction(messageId, userId);
+    
+    // Emit socket event for real-time update
+    const io = req.app.get('io');
+    const connectedUsers = req.app.get('connectedUsers');
+    
+    const senderId = String(updatedMessage.senderId?._id || updatedMessage.senderId);
+    const recipientId = String(updatedMessage.recipientId?._id || updatedMessage.recipientId);
+    
+    const reactionPayload = {
+      messageId,
+      reactions: updatedMessage.reactions,
+      removedBy: userId,
+    };
+
+    const senderSocketId = connectedUsers?.[senderId];
+    const recipientSocketId = connectedUsers?.[recipientId];
+    
+    if (senderSocketId) io.to(senderSocketId).emit('message:reaction', reactionPayload);
+    if (recipientSocketId && recipientSocketId !== senderSocketId) {
+      io.to(recipientSocketId).emit('message:reaction', reactionPayload);
+    }
+
+    res.json(updatedMessage);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// Delete Message Handler (WhatsApp-style)
+// ─────────────────────────────────────────────────────────
+async function deleteMessage(req, res, next) {
+  try {
+    const userId = req.user.id;
+    const { messageId } = req.params;
+    const { deleteType } = req.body; // 'me' or 'everyone'
+
+    if (!deleteType || !['me', 'everyone'].includes(deleteType)) {
+      return res.status(400).json({ message: "deleteType must be 'me' or 'everyone'" });
+    }
+
+    let result;
+    
+    if (deleteType === 'everyone') {
+      result = await messageService.deleteMessage(messageId, userId);
+    } else {
+      result = await messageService.deleteMessageForMe(messageId, userId);
+    }
+
+    // Emit socket event for real-time update
+    const io = req.app.get('io');
+    const connectedUsers = req.app.get('connectedUsers');
+
+    const senderId = String(result.senderId?._id || result.senderId);
+    const recipientId = String(result.recipientId?._id || result.recipientId);
+
+    const deletePayload = {
+      messageId,
+      deleteType,
+      deletedBy: String(userId),
+    };
+
+    // For "delete for everyone", notify both users
+    // For "delete for me", only notify the user who deleted
+    if (deleteType === 'everyone') {
+      const senderSocketId = connectedUsers?.[senderId];
+      const recipientSocketId = connectedUsers?.[recipientId];
+      
+      if (senderSocketId) io.to(senderSocketId).emit('message:deleted', deletePayload);
+      if (recipientSocketId && recipientSocketId !== senderSocketId) {
+        io.to(recipientSocketId).emit('message:deleted', deletePayload);
+      }
+    } else {
+      // Delete for me - only notify the user who deleted
+      const userSocketId = connectedUsers?.[userId];
+      if (userSocketId) io.to(userSocketId).emit('message:deleted', deletePayload);
+    }
+
+    res.json({ success: true, messageId, deleteType });
+  } catch (err) {
+    console.error('Delete message error:', err.message);
+    if (err.message === 'Message not found') {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+    if (err.message === 'You can only delete your own messages for everyone') {
+      return res.status(403).json({ message: err.message });
+    }
     next(err);
   }
 }

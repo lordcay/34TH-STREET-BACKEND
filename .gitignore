@@ -41,6 +41,7 @@ typings
 .env
 .env.*
 config.json
+config.js
 config.*.json
 
 # uploads (optional)

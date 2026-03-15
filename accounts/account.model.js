@@ -16,6 +16,14 @@ currentCity: { type: String, default: '' },
 locationUpdatedAt: { type: Date, default: null },
 locationSharingEnabled: { type: Boolean, default: true },
 
+    // Presence/Online Status Fields
+    onlineStatus: { 
+        type: String, 
+        enum: ['online', 'inactive', 'offline'], 
+        default: 'offline' 
+    },
+    lastSeen: { type: Date, default: null },
+    lastActivity: { type: Date, default: null },
 
     // New Fields
     nickname: { type: String },
@@ -35,6 +43,9 @@ locationSharingEnabled: { type: Boolean, default: true },
     rship: { type: String },
     welcomeEmailSent: { type: Boolean, default: false },
     role: { type: String, required: true, default: 'User' },
+    
+    // Push notifications
+    expoPushToken: { type: String, default: null },
 
 
 

@@ -21,4 +21,11 @@ router.get('/conversations/list', authorize(), controller.getConversations);
 router.get('/:userId', authorize(), controller.getMessages);
 router.post('/', authorize(), controller.sendMessage);
 
+// Reactions endpoints
+router.post('/:messageId/react', authorize(), controller.addReaction);
+router.delete('/:messageId/react', authorize(), controller.removeReaction);
+
+// Delete message endpoint (WhatsApp-style)
+router.delete('/:messageId', authorize(), controller.deleteMessage);
+
 module.exports = router;

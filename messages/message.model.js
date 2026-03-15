@@ -25,13 +25,57 @@
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
+// Reaction sub-schema
+const reactionSchema = new Schema({
+  userId: { type: Schema.Types.ObjectId, ref: 'Account', required: true },
+  emoji: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
+}, { _id: false });
+
 const schema = new Schema({
   senderId:     { type: Schema.Types.ObjectId, ref: 'Account', required: true },
   recipientId:  { type: Schema.Types.ObjectId, ref: 'Account', required: true },
-  message:      { type: String, required: true },
+  message:      { type: String, default: '' },  // Text content (optional for media messages)
   timestamp:    { type: Date, default: Date.now },
   read:         { type: Boolean, default: false },
-  expoPushToken:{ type: String }
+  expoPushToken:{ type: String },
+  
+  // Message type: text, image, audio, document, contact, gif
+  messageType:  { 
+    type: String, 
+    enum: ['text', 'image', 'audio', 'document', 'contact', 'gif'],
+    default: 'text' 
+  },
+  
+  // Media fields (for image, audio, document)
+  mediaUrl:     { type: String, default: null },  // URL to the uploaded file
+  fileName:     { type: String, default: null },  // Original filename
+  fileSize:     { type: Number, default: null },  // File size in bytes
+  mimeType:     { type: String, default: null },  // MIME type
+  duration:     { type: Number, default: null },  // For audio: duration in seconds
+  thumbnail:    { type: String, default: null },  // Thumbnail URL for images/videos
+  
+  // Contact fields (for contact sharing)
+  contactInfo: {
+    name:       { type: String, default: null },
+    phone:      { type: String, default: null },
+    email:      { type: String, default: null }
+  },
+  
+  // Reply feature - reference to the message being replied to
+  replyTo: { 
+    type: Schema.Types.ObjectId, 
+    ref: 'Message',
+    default: null 
+  },
+  
+  // Emoji reactions
+  reactions: [reactionSchema],
+
+  // Delete feature (WhatsApp-style)
+  deletedForEveryone: { type: Boolean, default: false },
+  deletedBy: { type: Schema.Types.ObjectId, ref: 'Account', default: null }, // Who deleted it for everyone
+  deletedForUsers: [{ type: Schema.Types.ObjectId, ref: 'Account' }] // Users who deleted it for themselves
 });
 
 // Make outputs friendly for clients that may read `id` or `_id`

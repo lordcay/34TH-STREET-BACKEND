@@ -27,6 +27,7 @@ const errorHandler = require('_middleware/error-handler');
 const imageRoutes = require('./uploads/image.controller');
 const db = require('./_helpers/db');
 const Message = db.Message;
+const Account = db.Account;
 const ChatroomMessage = require('./chatroomMessages/chatroomMessage.model');
 const chatroomMessageRoutes = require('./chatroomMessages/chatroomMessage.routes');
 const reportRoutes = require('./reportUser/report.routes');
@@ -73,22 +74,126 @@ app.use('/api', imageRoutes);
 app.use('/api-docs', require('_helpers/swagger'));
 app.use('/api/chatroom-messages', chatroomMessageRoutes);
 app.use('/feed', require('./feed/feed.routes'));
+app.use('/posts', require('./posts/post.routes'));
 
 app.use('/reports', reportRoutes);
 app.use('/blocks', blockRoutes);
+
+// 🤝 Connection routes
+app.use('/connections', require('./connections/connection.controller'));
+
 app.use(errorHandler);
 
 
 // ✅ In-memory store for connected users
 const connectedUsers = {};
 
+// ✅ In-memory store for active calls
+const activeCalls = {};
+
+// ✅ In-memory store for user activity timestamps (for inactive detection)
+const userActivityTimestamps = {};
+
+// ✅ Presence status constants
+const PRESENCE_STATUS = {
+  ONLINE: 'online',
+  INACTIVE: 'inactive',
+  OFFLINE: 'offline'
+};
+
+// ✅ Inactivity timeout (5 minutes = 300000ms)
+const INACTIVITY_TIMEOUT = 5 * 60 * 1000;
+
+// ✅ Helper function to update user presence in database
+async function updateUserPresence(userId, status) {
+  try {
+    const updateData = { onlineStatus: status };
+    if (status === PRESENCE_STATUS.OFFLINE) {
+      updateData.lastSeen = new Date();
+    }
+    if (status === PRESENCE_STATUS.ONLINE) {
+      updateData.lastActivity = new Date();
+    }
+    await Account.findByIdAndUpdate(userId, updateData);
+    console.log(`📍 User ${userId} presence updated to: ${status}`);
+  } catch (error) {
+    console.error('❌ Error updating user presence:', error);
+  }
+}
+
+// ✅ Helper function to broadcast presence change to relevant users
+function broadcastPresenceChange(userId, status, lastSeen = null) {
+  io.emit('presence:update', { 
+    userId, 
+    status, 
+    lastSeen: lastSeen || new Date().toISOString() 
+  });
+}
+
 io.on('connection', (socket) => {
     console.log('🟢 Socket connected:', socket.id);
 
     // Register user
-    socket.on('register', (userId) => {
+    socket.on('register', async (userId) => {
         connectedUsers[userId] = socket.id;
+        userActivityTimestamps[userId] = Date.now();
         console.log(`✅ Registered user ${userId} to socket ${socket.id}`);
+        
+        // Update presence to online
+        await updateUserPresence(userId, PRESENCE_STATUS.ONLINE);
+        broadcastPresenceChange(userId, PRESENCE_STATUS.ONLINE);
+    });
+
+    // ✅ Handle user activity (heartbeat to stay online)
+    socket.on('presence:activity', async (userId) => {
+      if (userId && connectedUsers[userId]) {
+        const wasInactive = userActivityTimestamps[userId] && 
+          (Date.now() - userActivityTimestamps[userId] > INACTIVITY_TIMEOUT);
+        
+        userActivityTimestamps[userId] = Date.now();
+        
+        // If was inactive, update to online
+        if (wasInactive) {
+          await updateUserPresence(userId, PRESENCE_STATUS.ONLINE);
+          broadcastPresenceChange(userId, PRESENCE_STATUS.ONLINE);
+        }
+      }
+    });
+
+    // ✅ Handle user going inactive (app backgrounded)
+    socket.on('presence:inactive', async (userId) => {
+      if (userId && connectedUsers[userId]) {
+        await updateUserPresence(userId, PRESENCE_STATUS.INACTIVE);
+        broadcastPresenceChange(userId, PRESENCE_STATUS.INACTIVE);
+      }
+    });
+
+    // ✅ Handle user coming back from inactive
+    socket.on('presence:active', async (userId) => {
+      if (userId && connectedUsers[userId]) {
+        userActivityTimestamps[userId] = Date.now();
+        await updateUserPresence(userId, PRESENCE_STATUS.ONLINE);
+        broadcastPresenceChange(userId, PRESENCE_STATUS.ONLINE);
+      }
+    });
+
+    // ✅ Get presence status of a specific user
+    socket.on('presence:get', async ({ userId }, callback) => {
+      try {
+        const user = await Account.findById(userId).select('onlineStatus lastSeen lastActivity');
+        if (user) {
+          callback({ 
+            status: user.onlineStatus || PRESENCE_STATUS.OFFLINE, 
+            lastSeen: user.lastSeen,
+            lastActivity: user.lastActivity
+          });
+        } else {
+          callback({ status: PRESENCE_STATUS.OFFLINE, lastSeen: null });
+        }
+      } catch (error) {
+        console.error('❌ Error getting presence:', error);
+        callback({ status: PRESENCE_STATUS.OFFLINE, lastSeen: null });
+      }
     });
 
     // Join chatroom
@@ -179,13 +284,39 @@ socket.on('stopTyping', ({ chatroomId, userId, senderName }) => {
 
    
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
         console.log('🔴 Socket disconnected:', socket.id);
+        let disconnectedUserId = null;
         for (const userId in connectedUsers) {
             if (connectedUsers[userId] === socket.id) {
+                disconnectedUserId = userId;
                 delete connectedUsers[userId];
+                delete userActivityTimestamps[userId];
                 break;
             }
+        }
+        
+        // Update presence to offline
+        if (disconnectedUserId) {
+            await updateUserPresence(disconnectedUserId, PRESENCE_STATUS.OFFLINE);
+            broadcastPresenceChange(disconnectedUserId, PRESENCE_STATUS.OFFLINE, new Date().toISOString());
+        }
+        
+        // Clean up any active call for this user
+        if (disconnectedUserId && activeCalls[disconnectedUserId]) {
+            const { peerId } = activeCalls[disconnectedUserId];
+            const peerSocketId = connectedUsers[peerId];
+            
+            // Notify the peer that the call ended due to disconnect
+            if (peerSocketId) {
+                io.to(peerSocketId).emit('call:ended', { 
+                    endedBy: disconnectedUserId, 
+                    reason: 'User disconnected' 
+                });
+            }
+            
+            delete activeCalls[peerId];
+            delete activeCalls[disconnectedUserId];
         }
     });
 
@@ -212,6 +343,130 @@ socket.on('dm:stopTyping', ({ meId, otherUserId, senderName }) => {
   const room = makePairKey(meId, otherUserId);
   socket.to(room).emit('dm:userStoppedTyping', { userId: meId, senderName });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// WEBRTC CALL SIGNALING
+// ═══════════════════════════════════════════════════════════════════
+
+// Initiate a call
+socket.on('call:initiate', ({ callerId, callerName, callerPhoto, calleeId, callType }) => {
+  console.log(`📞 Call initiated: ${callerId} -> ${calleeId} (${callType})`);
+  
+  const calleeSocketId = connectedUsers[calleeId];
+  
+  if (!calleeSocketId) {
+    // Callee is offline
+    socket.emit('call:unavailable', { 
+      calleeId, 
+      reason: 'User is offline' 
+    });
+    return;
+  }
+  
+  // Check if callee is already in a call
+  if (activeCalls[calleeId]) {
+    socket.emit('call:busy', { calleeId });
+    return;
+  }
+  
+  // Mark both users as in a call
+  const callId = `${callerId}_${calleeId}_${Date.now()}`;
+  activeCalls[callerId] = { callId, peerId: calleeId, callType };
+  activeCalls[calleeId] = { callId, peerId: callerId, callType };
+  
+  // Send incoming call to callee
+  io.to(calleeSocketId).emit('call:incoming', {
+    callId,
+    callerId,
+    callerName,
+    callerPhoto,
+    callType,
+  });
+});
+
+// WebRTC offer (SDP)
+socket.on('call:offer', ({ calleeId, offer }) => {
+  const calleeSocketId = connectedUsers[calleeId];
+  if (calleeSocketId) {
+    io.to(calleeSocketId).emit('call:offer', { offer });
+  }
+});
+
+// WebRTC answer (SDP)
+socket.on('call:answer', ({ callerId, answer }) => {
+  const callerSocketId = connectedUsers[callerId];
+  if (callerSocketId) {
+    io.to(callerSocketId).emit('call:answer', { answer });
+  }
+});
+
+// ICE candidate exchange
+socket.on('call:ice-candidate', ({ peerId, candidate }) => {
+  const peerSocketId = connectedUsers[peerId];
+  if (peerSocketId) {
+    io.to(peerSocketId).emit('call:ice-candidate', { candidate });
+  }
+});
+
+// Accept call
+socket.on('call:accept', ({ callerId, calleeId }) => {
+  console.log(`✅ Call accepted: ${calleeId} accepted call from ${callerId}`);
+  const callerSocketId = connectedUsers[callerId];
+  if (callerSocketId) {
+    io.to(callerSocketId).emit('call:accepted', { calleeId });
+  }
+});
+
+// Reject call
+socket.on('call:reject', ({ callerId, calleeId, reason }) => {
+  console.log(`❌ Call rejected: ${calleeId} rejected call from ${callerId}`);
+  
+  // Clean up active calls
+  delete activeCalls[callerId];
+  delete activeCalls[calleeId];
+  
+  const callerSocketId = connectedUsers[callerId];
+  if (callerSocketId) {
+    io.to(callerSocketId).emit('call:rejected', { 
+      calleeId, 
+      reason: reason || 'Call declined' 
+    });
+  }
+});
+
+// End call
+socket.on('call:end', ({ peerId, endedBy }) => {
+  console.log(`📴 Call ended by ${endedBy}`);
+  
+  // Clean up active calls
+  delete activeCalls[endedBy];
+  delete activeCalls[peerId];
+  
+  const peerSocketId = connectedUsers[peerId];
+  if (peerSocketId) {
+    io.to(peerSocketId).emit('call:ended', { endedBy });
+  }
+});
+
+// Toggle video during call
+socket.on('call:toggle-video', ({ peerId, videoEnabled }) => {
+  const peerSocketId = connectedUsers[peerId];
+  if (peerSocketId) {
+    io.to(peerSocketId).emit('call:video-toggled', { videoEnabled });
+  }
+});
+
+// Toggle audio during call
+socket.on('call:toggle-audio', ({ peerId, audioEnabled }) => {
+  const peerSocketId = connectedUsers[peerId];
+  if (peerSocketId) {
+    io.to(peerSocketId).emit('call:audio-toggled', { audioEnabled });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// END WEBRTC CALL SIGNALING
+// ═══════════════════════════════════════════════════════════════════
 
 
 });

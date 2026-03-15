@@ -6,6 +6,7 @@ const validateRequest = require('_middleware/validate-request');
 const authorize = require('_middleware/authorize')
 const Role = require('_helpers/role');
 const accountService = require('./account.service');
+const db = require('_helpers/db');
 const upload = require('../_middleware/upload');
 const jwt = require('jsonwebtoken');
 const config = require('../config.js');
@@ -29,6 +30,7 @@ router.put('/me/location', authorize(), updateMyLocation);
 
 router.get('/:id', authorize(), getById);
 router.post('/push-token', authorize(), savePushToken);
+router.get('/:id/presence', authorize(), getUserPresence);
 
 
 
@@ -265,6 +267,26 @@ function getById(req, res, next) {
         .catch(next);
 
 
+}
+
+// ✅ Get user presence/online status
+async function getUserPresence(req, res, next) {
+    try {
+        const user = await Account.findById(req.params.id)
+            .select('onlineStatus lastSeen lastActivity');
+        
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        
+        res.json({
+            status: user.onlineStatus || 'offline',
+            lastSeen: user.lastSeen,
+            lastActivity: user.lastActivity
+        });
+    } catch (error) {
+        next(error);
+    }
 }
 
 function createSchema(req, res, next) {

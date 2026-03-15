@@ -340,6 +340,8 @@ function basicDetails(account) {
         nickname, DOB, languages, fieldOfStudy, graduationYear,
         industry, currentRole, linkedIn, funFact, rship, currentCity,
     locationUpdatedAt, locationSharingEnabled,
+    // 🔴 Presence fields
+    onlineStatus, lastSeen, lastActivity,
 
     } = account;
 
@@ -354,6 +356,10 @@ function basicDetails(account) {
     locationUpdatedAt, locationSharingEnabled, 
     currentCity: share ? (currentCity || '') : '',
     locationUpdatedAt: share ? locationUpdatedAt : null,
+    // 🔴 Include presence fields in API response
+    onlineStatus: onlineStatus || 'offline',
+    lastSeen: lastSeen || null,
+    lastActivity: lastActivity || null,
 
     };
     

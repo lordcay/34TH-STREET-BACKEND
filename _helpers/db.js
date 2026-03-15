@@ -48,6 +48,9 @@ module.exports = {
   FeedVote: require('../feed/feedVote.model'),
   FeedComment: require('../feed/feedComment.model'),
 
+  // 🤝 Connections
+  Connection: require('../connections/connection.model'),
+
   // Utils
   isValidId
 };
