@@ -17,7 +17,7 @@ function generateJwtToken(account) {
     return jwt.sign(
         { sub: account.id, id: account.id },
         config.JWT_SECRET,
-        { expiresIn: '7d' }
+        { expiresIn: '30d' }
     );
 }
 
