@@ -75,10 +75,25 @@ exports.toggleBlock = async (req, res) => {
 
 
 exports.checkBlockStatus = async (req, res) => {
-  const blocker = req.user.id;
-  const blocked = req.params.blockedId;
+  try {
+    const blocker = req.user.id;
+    const blocked = req.params.blockedId;
 
-  const exists = await Block.exists({ blocker, blocked });
-  res.json({ isBlocked: !!exists });
+    // Validate blocked ID exists and is a valid MongoDB ObjectId
+    if (!blocked || blocked === 'undefined' || blocked === 'null') {
+      return res.json({ isBlocked: false });
+    }
+
+    // Check if it's a valid 24-character hex string (MongoDB ObjectId)
+    if (!/^[a-fA-F0-9]{24}$/.test(blocked)) {
+      return res.json({ isBlocked: false });
+    }
+
+    const exists = await Block.exists({ blocker, blocked });
+    res.json({ isBlocked: !!exists });
+  } catch (err) {
+    console.error('❌ Check block status error:', err);
+    res.json({ isBlocked: false });
+  }
 };
 

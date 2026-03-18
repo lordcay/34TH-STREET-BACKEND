@@ -51,10 +51,19 @@ router.delete('/:postId/comments/:commentId', authorize(), postController.delete
 // Like comment
 router.post('/:postId/comments/:commentId/like', authorize(), postController.likeComment);
 
+// Reply to comment
+router.post('/:postId/comments/:commentId/reply', authorize(), postController.replyToComment);
+
+// Like a reply
+router.post('/:postId/comments/:commentId/replies/:replyIndex/like', authorize(), postController.likeReply);
+
 // ============ Sharing ============
 
 // Share/repost a post
 router.post('/:postId/share', authorize(), postController.sharePost);
+
+// Share post to specific connections (direct share with notifications)
+router.post('/:postId/share/connections', authorize(), postController.shareToConnections);
 
 // ============ Polls ============
 

@@ -49,6 +49,16 @@ const replyToSchema = new mongoose.Schema({
     message: { type: String },
 }, { _id: false });
 
+// Schema for nested replies on a message
+const nestedReplySchema = new mongoose.Schema({
+    senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', required: true },
+    senderName: { type: String },
+    avatarUrl: { type: String },
+    message: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+    likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Account' }],
+}, { _id: true });
+
 const chatroomMessageSchema = new mongoose.Schema(
     {
         chatroomId: {
@@ -79,6 +89,22 @@ const chatroomMessageSchema = new mongoose.Schema(
             },
         ],
         replyTo: replyToSchema,
+        // Nested replies (threaded conversation on a message)
+        replies: [nestedReplySchema],
+        // Likes array for message reactions
+        likes: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Account',
+            },
+        ],
+        // Mentioned users extracted from @mentions
+        mentions: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Account',
+            },
+        ],
         readBy: [
             {
                 type: mongoose.Schema.Types.ObjectId,
@@ -92,5 +118,15 @@ const chatroomMessageSchema = new mongoose.Schema(
         toObject: { virtuals: true },
     }
 );
+
+// Virtual for like count
+chatroomMessageSchema.virtual('likeCount').get(function() {
+    return this.likes ? this.likes.length : 0;
+});
+
+// Virtual for reply count
+chatroomMessageSchema.virtual('replyCount').get(function() {
+    return this.replies ? this.replies.length : 0;
+});
 
 module.exports = mongoose.model('ChatroomMessage', chatroomMessageSchema);

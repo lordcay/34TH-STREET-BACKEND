@@ -18,7 +18,14 @@ const commentSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: 'Account', required: true },
   text: { type: String, required: true, maxlength: 1000 },
   createdAt: { type: Date, default: Date.now },
-  likes: [{ type: Schema.Types.ObjectId, ref: 'Account' }]
+  likes: [{ type: Schema.Types.ObjectId, ref: 'Account' }],
+  // Replies to comments (flat, single level - like LinkedIn)
+  replies: [{
+    userId: { type: Schema.Types.ObjectId, ref: 'Account', required: true },
+    text: { type: String, required: true, maxlength: 500 },
+    createdAt: { type: Date, default: Date.now },
+    likes: [{ type: Schema.Types.ObjectId, ref: 'Account' }]
+  }]
 });
 
 const postSchema = new Schema({
@@ -30,16 +37,25 @@ const postSchema = new Schema({
     index: true
   },
   
-  // Content
+  // Content (optional - can post with just images or just text)
   content: { 
     type: String, 
-    required: true, 
+    required: false,
     maxlength: 3000,
-    trim: true
+    trim: true,
+    default: ''
   },
   
   // Media attachments (images, etc.)
   images: [{ type: String }], // Array of image URLs
+  
+  // Document attachments
+  documents: [{
+    url: { type: String, required: true },
+    name: { type: String },
+    size: { type: Number },
+    mimeType: { type: String }
+  }],
   
   // Post type
   postType: {

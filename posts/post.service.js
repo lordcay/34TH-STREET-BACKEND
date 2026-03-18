@@ -1,24 +1,30 @@
 // posts/post.service.js
 const Post = require('./post.model');
 const mongoose = require('mongoose');
+const Account = require('../accounts/account.model');
+const Connection = require('../connections/connection.model');
 
 const postService = {
   /**
    * Create a new post
    */
   async createPost(authorId, postData) {
-    const { content, images, postType, linkPreview, poll, visibility, hashtags, school } = postData;
+    const { content, images, postType, linkPreview, poll, visibility, hashtags, school, documents } = postData;
+    
+    // Ensure content is at least an empty string
+    const safeContent = content || '';
     
     // Extract hashtags from content if not provided
-    const extractedHashtags = hashtags || this.extractHashtags(content);
-    // Extract mentions from content
-    const mentions = this.extractMentions(content);
+    const extractedHashtags = hashtags || this.extractHashtags(safeContent);
+    // Extract mentions from content (now async)
+    const mentions = await this.extractMentions(safeContent);
     
     const post = new Post({
       author: authorId,
-      content,
+      content: safeContent,
       images: images || [],
-      postType: postType || (images?.length > 0 ? 'image' : 'text'),
+      documents: documents || [],
+      postType: postType || (poll ? 'poll' : (images?.length > 0 ? 'image' : 'text')),
       linkPreview,
       poll,
       visibility: visibility || 'public',
@@ -36,8 +42,9 @@ const postService = {
    */
   async getPostById(postId) {
     return Post.findById(postId)
-      .populate('author', 'firstName lastName profileImage verified school')
-      .populate('comments.userId', 'firstName lastName profileImage')
+      .populate('author', 'firstName lastName photos profileImage verified school')
+      .populate('comments.userId', 'firstName lastName photos profileImage')
+      .populate('comments.replies.userId', 'firstName lastName photos profileImage')
       .populate('originalPost')
       .lean();
   },
@@ -48,27 +55,56 @@ const postService = {
   async getFeedPosts({ page = 1, limit = 20, userId, school }) {
     const skip = (page - 1) * limit;
     
-    const query = { isDeleted: { $ne: true } };
+    // Get current user's connection IDs for visibility filtering
+    let connectedUserIds = [];
+    if (userId) {
+      const connections = await Connection.find({
+        $or: [
+          { requester: userId, status: 'connected' },
+          { target: userId, status: 'connected' }
+        ]
+      }).select('requester target').lean();
+      
+      connectedUserIds = connections.map(c =>
+        c.requester.toString() === userId.toString()
+          ? c.target.toString()
+          : c.requester.toString()
+      );
+    }
+    
+    const query = {
+      isDeleted: { $ne: true },
+      $or: [
+        // Public posts: everyone can see
+        { visibility: 'public' },
+        // Posts with no visibility set default to public
+        { visibility: { $exists: false } },
+        // Own posts: always visible regardless of visibility
+        ...(userId ? [{ author: userId }] : []),
+        // Connections-only posts: visible if viewer is connected to author
+        ...(connectedUserIds.length > 0
+          ? [{ visibility: 'connections', author: { $in: connectedUserIds } }]
+          : []),
+      ]
+    };
     
     // Optional: filter by school for school-specific feed
     if (school) {
-      query.$or = [
-        { school },
-        { visibility: 'public' }
-      ];
+      query.school = school;
     }
     
     const posts = await Post.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('author', 'firstName lastName profileImage verified school bio')
-      .populate('comments.userId', 'firstName lastName profileImage')
+      .populate('author', 'firstName lastName photos profileImage verified school bio')
+      .populate('comments.userId', 'firstName lastName photos profileImage')
+      .populate('comments.replies.userId', 'firstName lastName photos profileImage')
       .populate({
         path: 'originalPost',
         populate: {
           path: 'author',
-          select: 'firstName lastName profileImage verified'
+          select: 'firstName lastName photos profileImage verified'
         }
       })
       .lean();
@@ -101,15 +137,50 @@ const postService = {
   async getUserPosts({ userId, page = 1, limit = 20, viewerId }) {
     const skip = (page - 1) * limit;
     
-    const posts = await Post.find({ 
-      author: userId, 
-      isDeleted: { $ne: true } 
-    })
+    // Build visibility filter based on viewer relationship
+    let visibilityFilter;
+    if (viewerId && viewerId.toString() === userId.toString()) {
+      // Viewing own profile — see everything
+      visibilityFilter = { author: userId, isDeleted: { $ne: true } };
+    } else if (viewerId) {
+      // Check if viewer is connected to this user
+      const isConnected = await Connection.areConnected(viewerId, userId);
+      if (isConnected) {
+        // Connected — see public + connections posts
+        visibilityFilter = {
+          author: userId,
+          isDeleted: { $ne: true },
+          visibility: { $in: ['public', 'connections'] }
+        };
+      } else {
+        // Not connected — only public posts
+        visibilityFilter = {
+          author: userId,
+          isDeleted: { $ne: true },
+          $or: [
+            { visibility: 'public' },
+            { visibility: { $exists: false } }
+          ]
+        };
+      }
+    } else {
+      // No viewer (anonymous) — only public
+      visibilityFilter = {
+        author: userId,
+        isDeleted: { $ne: true },
+        $or: [
+          { visibility: 'public' },
+          { visibility: { $exists: false } }
+        ]
+      };
+    }
+    
+    const posts = await Post.find(visibilityFilter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('author', 'firstName lastName profileImage verified school')
-      .populate('comments.userId', 'firstName lastName profileImage')
+      .populate('author', 'firstName lastName photos profileImage verified school')
+      .populate('comments.userId', 'firstName lastName photos profileImage')
       .lean();
     
     if (viewerId) {
@@ -118,7 +189,7 @@ const postService = {
       });
     }
     
-    const total = await Post.countDocuments({ author: userId, isDeleted: { $ne: true } });
+    const total = await Post.countDocuments(visibilityFilter);
     
     return {
       posts,
@@ -251,9 +322,62 @@ const postService = {
   },
   
   /**
+   * Reply to a comment
+   */
+  async replyToComment(postId, commentId, userId, text) {
+    const post = await Post.findById(postId);
+    if (!post) throw new Error('Post not found');
+    
+    const comment = post.comments.id(commentId);
+    if (!comment) throw new Error('Comment not found');
+    
+    // Initialize replies array if it doesn't exist
+    if (!comment.replies) {
+      comment.replies = [];
+    }
+    
+    comment.replies.push({
+      userId,
+      text: text.trim(),
+      createdAt: new Date(),
+      likes: []
+    });
+    
+    await post.save();
+    return this.getPostById(postId);
+  },
+  
+  /**
+   * Like a reply
+   */
+  async likeReply(postId, commentId, replyIndex, userId) {
+    const post = await Post.findById(postId);
+    if (!post) throw new Error('Post not found');
+    
+    const comment = post.comments.id(commentId);
+    if (!comment) throw new Error('Comment not found');
+    
+    if (!comment.replies || !comment.replies[replyIndex]) {
+      throw new Error('Reply not found');
+    }
+    
+    const reply = comment.replies[replyIndex];
+    const likeIndex = reply.likes.indexOf(userId);
+    
+    if (likeIndex > -1) {
+      reply.likes.splice(likeIndex, 1);
+    } else {
+      reply.likes.push(userId);
+    }
+    
+    await post.save();
+    return this.getPostById(postId);
+  },
+  
+  /**
    * Share/Repost a post
    */
-  async sharePost(postId, userId, additionalContent = '') {
+  async sharePost(postId, userId, additionalContent = '', visibility = 'public') {
     const originalPost = await Post.findById(postId);
     if (!originalPost) throw new Error('Post not found');
     
@@ -270,7 +394,8 @@ const postService = {
       content: additionalContent,
       originalPost: postId,
       isRepost: true,
-      postType: 'text'
+      postType: 'text',
+      visibility: visibility
     });
     
     await repost.save();
@@ -293,7 +418,7 @@ const postService = {
     if (content !== undefined) {
       post.content = content;
       post.hashtags = this.extractHashtags(content);
-      post.mentions = this.extractMentions(content);
+      post.mentions = await this.extractMentions(content);
     }
     if (images !== undefined) post.images = images;
     if (visibility !== undefined) post.visibility = visibility;
@@ -331,7 +456,13 @@ const postService = {
       throw new Error('Poll has ended');
     }
     
-    // Remove previous vote if any
+    // Check if user already voted on this exact option (toggle off)
+    const currentOption = post.poll.options[optionIndex];
+    if (!currentOption) throw new Error('Invalid option');
+    
+    const alreadyVotedThis = currentOption.votes.indexOf(userId) > -1;
+    
+    // Remove previous vote from all options
     post.poll.options.forEach(option => {
       const voteIndex = option.votes.indexOf(userId);
       if (voteIndex > -1) {
@@ -339,9 +470,10 @@ const postService = {
       }
     });
     
-    // Add new vote
-    if (post.poll.options[optionIndex]) {
-      post.poll.options[optionIndex].votes.push(userId);
+    // If user tapped a different option (or first vote), add the vote
+    // If user tapped the same option they already voted on, just remove (toggle off)
+    if (!alreadyVotedThis) {
+      currentOption.votes.push(userId);
     }
     
     await post.save();
@@ -362,14 +494,20 @@ const postService = {
     const skip = (page - 1) * limit;
     const cleanTag = hashtag.replace('#', '').toLowerCase();
     
+    // Use partial matching - match hashtags that START WITH or CONTAIN the search term
     const posts = await Post.find({
-      hashtags: { $regex: new RegExp(`^${cleanTag}$`, 'i') },
+      $or: [
+        // Match hashtags that contain the search term (partial match)
+        { hashtags: { $regex: new RegExp(cleanTag, 'i') } },
+        // Also match content that contains the hashtag
+        { content: { $regex: new RegExp(`#${cleanTag}`, 'i') } }
+      ],
       isDeleted: { $ne: true }
     })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('author', 'firstName lastName profileImage verified')
+      .populate('author', 'firstName lastName photos profileImage verified')
       .lean();
     
     return posts;
@@ -394,18 +532,54 @@ const postService = {
    * Extract hashtags from content
    */
   extractHashtags(content) {
+    if (!content) return [];
     const matches = content.match(/#[\w]+/g) || [];
     return [...new Set(matches.map(t => t.toLowerCase().replace('#', '')))];
   },
   
   /**
    * Extract mentions from content
+   * Matches @FirstnameLastname or @Firstname patterns
+   * Returns array of user ObjectIds
    */
-  extractMentions(content) {
-    // This would need to be enhanced to look up actual user IDs
-    // For now, just extract the patterns
-    const matches = content.match(/@[\w]+/g) || [];
-    return [];
+  async extractMentions(content) {
+    if (!content) return [];
+    
+    // Match @followed by word characters (allows multiple words for full names)
+    // Pattern: @word or @word_word (underscores for spaces)
+    const matches = content.match(/@[\w]+(?:_[\w]+)?/g) || [];
+    
+    if (matches.length === 0) return [];
+    
+    const mentionNames = matches.map(m => m.slice(1)); // Remove @
+    const userIds = [];
+    
+    for (const name of mentionNames) {
+      // Try to find user by name (firstName_lastName or firstName)
+      const nameParts = name.split('_');
+      
+      let user;
+      if (nameParts.length >= 2) {
+        // Try firstName_lastName match
+        user = await Account.findOne({
+          firstName: { $regex: new RegExp(`^${nameParts[0]}$`, 'i') },
+          lastName: { $regex: new RegExp(`^${nameParts.slice(1).join(' ')}$`, 'i') }
+        }).select('_id');
+      }
+      
+      if (!user) {
+        // Try firstName only match (for unique first names)
+        user = await Account.findOne({
+          firstName: { $regex: new RegExp(`^${nameParts[0]}$`, 'i') }
+        }).select('_id');
+      }
+      
+      if (user && !userIds.some(id => id.equals(user._id))) {
+        userIds.push(user._id);
+      }
+    }
+    
+    return userIds;
   }
 };
 

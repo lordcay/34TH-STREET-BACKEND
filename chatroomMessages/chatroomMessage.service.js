@@ -3,7 +3,7 @@
 // chatroomMessage.service.js
 const ChatroomMessage = require('./chatroomMessage.model');
 
-async function createMessage({ chatroomId, senderId, message, media, avatarUrl, senderName, replyTo }) {
+async function createMessage({ chatroomId, senderId, message, media, avatarUrl, senderName, replyTo, mentions = [] }) {
     const created = await ChatroomMessage.create({
         chatroomId,
         senderId,
@@ -12,18 +12,24 @@ async function createMessage({ chatroomId, senderId, message, media, avatarUrl, 
         avatarUrl,
         senderName,
         replyTo: replyTo || null,
+        mentions: mentions || [],
     });
 
     // Return populated message so frontend and socket listeners receive the same shape
     return ChatroomMessage.findById(created._id)
         .populate('senderId', '_id firstName lastName photos')
-        .populate('replyTo.senderId', '_id firstName lastName photos');
+        .populate('replyTo.senderId', '_id firstName lastName photos')
+        .populate('mentions', '_id firstName lastName photos')
+        .populate('likes', '_id firstName lastName photos');
 }
 
 async function getMessagesByChatroom(chatroomId) {
     return ChatroomMessage.find({ chatroomId })
         .populate('senderId', '_id firstName lastName photos')
         .populate('replyTo.senderId', '_id firstName lastName photos')
+        .populate('mentions', '_id firstName lastName photos')
+        .populate('likes', '_id firstName lastName photos')
+        .populate('replies.senderId', '_id firstName lastName photos')
         .sort({ createdAt: 1 });
 }
 

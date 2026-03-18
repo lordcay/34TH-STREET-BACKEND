@@ -47,6 +47,9 @@ locationSharingEnabled: { type: Boolean, default: true },
     // Push notifications
     expoPushToken: { type: String, default: null },
 
+    // Onboarding coach marks tracking
+    onboardingCompleted: [{ type: String }],
+
 
 
     verificationToken: String,

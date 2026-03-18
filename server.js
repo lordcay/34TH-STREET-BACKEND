@@ -82,6 +82,9 @@ app.use('/blocks', blockRoutes);
 // 🤝 Connection routes
 app.use('/connections', require('./connections/connection.controller'));
 
+// 🔔 Notification routes
+app.use('/notifications', require('./notifications/notification.controller'));
+
 app.use(errorHandler);
 
 
@@ -211,7 +214,7 @@ io.on('connection', (socket) => {
     });
 
     // Send chatroom message (save and broadcast)
-    socket.on('sendChatroomMessage', async ({ chatroomId, senderId, message, media, senderName, avatarUrl }) => {
+    socket.on('sendChatroomMessage', async ({ chatroomId, senderId, message, media, senderName, avatarUrl, replyTo }) => {
   try {
     // 🔥 1. OBJECTIONABLE CONTENT FILTER (same as DM logic)
     const containsObjectionableContent = require('./utils/filterObjectionableContent');
@@ -220,14 +223,31 @@ io.on('connection', (socket) => {
         message: 'Message contains inappropriate content.',
       });
     }
+    
+    // Create message with replyTo support for threading
     const newMessage = await ChatroomMessage.create({
-      chatroomId, senderId, message, media, readBy: [senderId], senderName, avatarUrl
+      chatroomId, 
+      senderId, 
+      message, 
+      media, 
+      readBy: [senderId], 
+      senderName, 
+      avatarUrl,
+      replyTo: replyTo || null, // ✅ Include replyTo for message threading
     });
 
     const payload = {
       ...newMessage.toObject(),
-      senderName: senderName || 'Someone'
+      senderName: senderName || 'Someone',
+      replyTo: replyTo || null, // ✅ Ensure replyTo is in broadcast payload
     };
+
+    console.log('📨 Broadcasting chatroom message:', { 
+      _id: payload._id, 
+      message: payload.message?.slice(0, 30), 
+      hasReplyTo: !!payload.replyTo,
+      replyToMessageId: payload.replyTo?.messageId 
+    });
 
     io.to(chatroomId).emit('newChatroomMessage', payload);
 

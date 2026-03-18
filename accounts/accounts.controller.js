@@ -32,6 +32,10 @@ router.get('/:id', authorize(), getById);
 router.post('/push-token', authorize(), savePushToken);
 router.get('/:id/presence', authorize(), getUserPresence);
 
+// Onboarding coach marks
+router.get('/me/onboarding', authorize(), getOnboardingState);
+router.patch('/me/onboarding', authorize(), updateOnboardingState);
+
 
 
 router.post('/', authorize(Role.Admin), createSchema, create);
@@ -456,9 +460,37 @@ function setTokenCookie(res, token) {
     res.cookie('refreshToken', token, cookieOptions);
 }
 
+// Onboarding coach marks
 
+async function getOnboardingState(req, res, next) {
+    try {
+        const account = await Account.findById(req.user.id).select('onboardingCompleted');
+        if (!account) return res.status(404).json({ message: 'Account not found' });
+        res.json({ completedScreens: account.onboardingCompleted || [] });
+    } catch (err) {
+        next(err);
+    }
+}
 
+async function updateOnboardingState(req, res, next) {
+    try {
+        const { completedScreens } = req.body;
+        if (!Array.isArray(completedScreens)) {
+            return res.status(400).json({ message: 'completedScreens must be an array' });
+        }
 
+        const account = await Account.findByIdAndUpdate(
+            req.user.id,
+            { $addToSet: { onboardingCompleted: { $each: completedScreens } } },
+            { new: true }
+        ).select('onboardingCompleted');
+
+        if (!account) return res.status(404).json({ message: 'Account not found' });
+        res.json({ completedScreens: account.onboardingCompleted });
+    } catch (err) {
+        next(err);
+    }
+}
 
 
 

@@ -25,4 +25,19 @@ router.get('/:chatroomId/messages', authorize(), chatroomMessageController.fetch
 // Send a message to a chatroom
 router.post('/', authorize(), chatroomMessageController.sendMessage);
 
+// Delete a message (only by sender)
+router.delete('/:messageId', authorize(), chatroomMessageController.deleteMessage);
+
+// Like/Unlike a message
+router.post('/:messageId/like', authorize(), chatroomMessageController.toggleLike);
+
+// Add a nested reply to a message
+router.post('/:messageId/reply', authorize(), chatroomMessageController.addReply);
+
+// Get replies for a message (paginated)
+router.get('/:messageId/replies', authorize(), chatroomMessageController.getReplies);
+
+// Like/Unlike a nested reply
+router.post('/:messageId/replies/:replyId/like', authorize(), chatroomMessageController.toggleReplyLike);
+
 module.exports = router;
