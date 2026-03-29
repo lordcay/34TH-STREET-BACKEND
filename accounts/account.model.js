@@ -12,9 +12,22 @@ const schema = new Schema({
     lastName: { type: String, required: true },
     gender: { type: String, required: true },
     type: { type: String, required: true },
-currentCity: { type: String, default: '' },
-locationUpdatedAt: { type: Date, default: null },
-locationSharingEnabled: { type: Boolean, default: true },
+    
+    // Location fields for Tinder-style distance calculation
+    currentCity: { type: String, default: '' },
+    location: {
+        type: {
+            type: String,
+            enum: ['Point'],
+            default: 'Point'
+        },
+        coordinates: {
+            type: [Number], // [longitude, latitude]
+            default: [0, 0]
+        }
+    },
+    locationUpdatedAt: { type: Date, default: null },
+    locationSharingEnabled: { type: Boolean, default: true },
 
     // Presence/Online Status Fields
     onlineStatus: { 
@@ -77,5 +90,8 @@ schema.set('toJSON', {
         delete ret.passwordHash;
     }
 });
+
+// Create 2dsphere index for geospatial queries (proximity search)
+schema.index({ 'location': '2dsphere' });
 
 module.exports = mongoose.model('Account', schema);

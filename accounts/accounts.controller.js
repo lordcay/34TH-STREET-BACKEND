@@ -13,6 +13,7 @@ const config = require('../config.js');
 const Account = require('./account.model');
 const bcrypt = require('bcryptjs');
 const containsObjectionableContent = require('../utils/filterObjectionableContent');
+const { addDistancesToUsers, sortByDistance } = require('../utils/locationUtils');
 
 
 // routes
@@ -27,6 +28,8 @@ router.post('/reset-password', resetPasswordSchema, resetPassword);
 router.get('/', authorize(Role.Admin), getAll);
 router.get('/verified', authorize(), getVerifiedUsers);
 router.put('/me/location', authorize(), updateMyLocation);
+router.put('/me/location-settings', authorize(), updateLocationSettings);
+router.get('/me/location', authorize(), getMyLocation);
 
 router.get('/:id', authorize(), getById);
 router.post('/push-token', authorize(), savePushToken);
@@ -206,14 +209,29 @@ function verifyEmail(req, res, next) {
 
 function getVerifiedUsers(req, res, next) {
     const currentUserId = req.user.id; // 🔐 comes from JWT authorize middleware
+    const { sortByDistance: shouldSortByDistance } = req.query; // Optional query param
 
-    accountService.getVerifiedUsers()
-        .then(users => {
-            // 🧼 filter out the logged-in user
-            const filteredUsers = users.filter(user => user.id !== currentUserId);
-            res.json(filteredUsers);
-        })
-        .catch(next);
+    Promise.all([
+        accountService.getVerifiedUsers(),
+        Account.findById(currentUserId).select('location locationSharingEnabled')
+    ])
+    .then(([users, currentUser]) => {
+        // 🧼 filter out the logged-in user
+        let filteredUsers = users.filter(user => user.id !== currentUserId);
+
+        // 📍 Add distance information if current user has location
+        if (currentUser?.location?.coordinates) {
+            filteredUsers = addDistancesToUsers(currentUser, filteredUsers);
+            
+            // Sort by distance if requested
+            if (shouldSortByDistance === 'true') {
+                filteredUsers = sortByDistance(filteredUsers);
+            }
+        }
+
+        res.json(filteredUsers);
+    })
+    .catch(next);
 }
 
 
@@ -355,15 +373,13 @@ async function updateMyLocation(req, res, next) {
   try {
     const userId = req.user?.id; // must exist from authorize middleware
 
-
     if (!userId) {
       return res.status(401).json({ message: 'Unauthorized: missing user id in token' });
     }
 
-    let { currentCity, locationUpdatedAt } = req.body;
+    let { currentCity, latitude, longitude, locationUpdatedAt, locationSharingEnabled } = req.body;
 
-        console.log('📍 updateMyLocation:', { userId, currentCity });
-
+    console.log('📍 updateMyLocation:', { userId, currentCity, latitude, longitude });
 
     // Normalize city
     currentCity = typeof currentCity === 'string' ? currentCity.trim() : '';
@@ -375,16 +391,91 @@ async function updateMyLocation(req, res, next) {
     // ✅ sanitize city too
     currentCity = sanitizeField(currentCity);
 
+    // Build the update payload
     const payload = {
       currentCity,
       locationUpdatedAt: locationUpdatedAt ? new Date(locationUpdatedAt) : new Date(),
     };
+
+    // Add coordinates if provided (for Tinder-style distance calculation)
+    if (latitude !== undefined && longitude !== undefined) {
+      const lat = parseFloat(latitude);
+      const lng = parseFloat(longitude);
+      
+      if (!isNaN(lat) && !isNaN(lng)) {
+        payload.location = {
+          type: 'Point',
+          coordinates: [lng, lat] // GeoJSON format: [longitude, latitude]
+        };
+      }
+    }
+
+    // Update location sharing preference if provided
+    if (typeof locationSharingEnabled === 'boolean') {
+      payload.locationSharingEnabled = locationSharingEnabled;
+    }
 
     const updated = await accountService.update(userId, payload);
 
     // ✅ return the same shape your frontend expects elsewhere
     return res.json({ user: updated });
 
+  } catch (err) {
+    next(err);
+  }
+}
+
+// 📍 Get current user's location data
+async function getMyLocation(req, res, next) {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const account = await Account.findById(userId)
+      .select('currentCity location locationUpdatedAt locationSharingEnabled');
+
+    if (!account) {
+      return res.status(404).json({ message: 'Account not found' });
+    }
+
+    // Extract coordinates safely
+    const coordinates = account.location?.coordinates || [0, 0];
+    const [longitude, latitude] = coordinates;
+
+    res.json({
+      currentCity: account.currentCity || '',
+      latitude: latitude || null,
+      longitude: longitude || null,
+      locationUpdatedAt: account.locationUpdatedAt,
+      locationSharingEnabled: account.locationSharingEnabled !== false
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// 📍 Update location sharing settings
+async function updateLocationSettings(req, res, next) {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const { locationSharingEnabled } = req.body;
+
+    if (typeof locationSharingEnabled !== 'boolean') {
+      return res.status(400).json({ message: 'locationSharingEnabled must be a boolean' });
+    }
+
+    const updated = await accountService.update(userId, { locationSharingEnabled });
+
+    res.json({ 
+      user: updated,
+      locationSharingEnabled: updated.locationSharingEnabled 
+    });
   } catch (err) {
     next(err);
   }

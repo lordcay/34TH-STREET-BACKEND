@@ -73,17 +73,20 @@ app.use('/uploads', express.static('uploads'));
 app.use('/api', imageRoutes);
 app.use('/api-docs', require('_helpers/swagger'));
 app.use('/api/chatroom-messages', chatroomMessageRoutes);
-app.use('/feed', require('./feed/feed.routes'));
-app.use('/posts', require('./posts/post.routes'));
+// app.use('/feed', require('./feed/feed.routes'));
+// app.use('/posts', require('./posts/post.routes'));
 
 app.use('/reports', reportRoutes);
 app.use('/blocks', blockRoutes);
 
 // 🤝 Connection routes
-app.use('/connections', require('./connections/connection.controller'));
+// app.use('/connections', require('./connections/connection.controller'));
 
-// 🔔 Notification routes
-app.use('/notifications', require('./notifications/notification.controller'));
+// � Events routes
+// app.use('/events', require('./events/event.routes'));
+
+// �🔔 Notification routes
+// app.use('/notifications', require('./notifications/notification.controller'));
 
 app.use(errorHandler);
 
