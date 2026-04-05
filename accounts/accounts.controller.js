@@ -9,7 +9,7 @@ const accountService = require('./account.service');
 const db = require('_helpers/db');
 const upload = require('../_middleware/upload');
 const jwt = require('jsonwebtoken');
-const config = require('../config.js');
+const config = require('../config.json');
 const Account = require('./account.model');
 const bcrypt = require('bcryptjs');
 const containsObjectionableContent = require('../utils/filterObjectionableContent');
@@ -56,7 +56,7 @@ module.exports = router;
 
 
 
-// const config = require('../config.js'); // Load config.js
+// const config = require('../config.json'); // Load config.json
 
 
 function sanitizeField(value) {
@@ -594,7 +594,7 @@ async function updateOnboardingState(req, res, next) {
 // const accountService = require('./account.service');
 // const upload = require('../_middleware/upload');
 // const jwt = require('jsonwebtoken');
-// const config = require('../config.js');
+// const config = require('../config.json');
 // const Account = require('./account.model');
 // const bcrypt = require('bcryptjs');
 // const containsObjectionableContent = require('../utils/filterObjectionableContent');
@@ -631,7 +631,7 @@ async function updateOnboardingState(req, res, next) {
 
 
 
-// // const config = require('../config.js'); // Load config.js
+// // const config = require('../config.json'); // Load config.json
 
 
 // function sanitizeField(value) {

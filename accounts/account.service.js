@@ -1,6 +1,6 @@
 ﻿
 
-const config = require('config.js');
+const config = require('config.json');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -406,7 +406,7 @@ function generateResetCode() {
 }
 
 
-// const config = require('config.js');
+// const config = require('config.json');
 // const jwt = require('jsonwebtoken');
 // const bcrypt = require('bcryptjs');
 // const crypto = require('crypto');
