@@ -1,6 +1,6 @@
 ﻿
 
-const config = require('config.json');
+const config = require('config.js');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -27,6 +27,7 @@ module.exports = {
     revokeToken,
     register,
     verifyEmail,
+    resendOTP,
     forgotPassword,
     validateResetToken,
     resetPassword,
@@ -104,13 +105,14 @@ async function register(params, origin) {
   account.verificationTokenExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
   await account.save();
 
-  // Try to send OTP email (do not fail registration if SMTP fails)
+  // Try to send OTP email with retry logic (do not fail registration if SMTP fails)
   let otpSent = true;
   try {
-    await sendVerificationEmail(account, origin);
+    await sendVerificationEmailWithRetry(account, origin);
+    console.log(`✅ Verification email sent to ${account.email}`);
   } catch (err) {
     otpSent = false;
-    console.error("OTP email failed:", err?.message || err);
+    console.error("❌ OTP email failed after retries:", err?.message || err);
   }
 
   return { account, otpSent, reason: account === existing ? "RESENT" : "CREATED" };
@@ -156,28 +158,127 @@ async function verifyEmail({ token }) {
   }
 }
 
+/**
+ * Resend OTP to user for verification
+ * Modern implementation with better error handling and rate limiting
+ */
+async function resendOTP({ email }, origin) {
+  try {
+    const account = await Account.findOne({ email: email.toLowerCase().trim() });
+    
+    if (!account) {
+      throw 'Email not found';
+    }
+
+    if (account.verified) {
+      throw 'Account already verified. Please login.';
+    }
+
+    // Check if user is requesting OTP too frequently (rate limiting)
+    const lastOtpTime = account.lastOtpRequestedAt || new Date(0);
+    const timeSinceLastOtp = Date.now() - lastOtpTime.getTime();
+    const MIN_TIME_BETWEEN_OTP = 30 * 1000; // 30 seconds
+
+    if (timeSinceLastOtp < MIN_TIME_BETWEEN_OTP) {
+      const retryAfter = Math.ceil((MIN_TIME_BETWEEN_OTP - timeSinceLastOtp) / 1000);
+      throw `Please wait ${retryAfter} seconds before requesting another OTP`;
+    }
+
+    // Generate new OTP
+    account.verificationToken = generateResetCode();
+    account.verificationTokenExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    account.lastOtpRequestedAt = new Date();
+    await account.save();
+
+    // Send OTP email with retry logic
+    await sendVerificationEmailWithRetry(account, origin);
+
+    return {
+      success: true,
+      message: 'OTP sent successfully',
+      email: account.email
+    };
+  } catch (error) {
+    console.error('❌ Resend OTP error:', error?.message || error);
+    throw error;
+  }
+}
+
+/**
+ * Send verification email with retry logic
+ */
+async function sendVerificationEmailWithRetry(account, origin, retries = 2) {
+  for (let attempt = 1; attempt <= retries + 1; attempt++) {
+    try {
+      await sendVerificationEmail(account, origin);
+      console.log(`✅ Verification email sent on attempt ${attempt}`);
+      return;
+    } catch (error) {
+      console.error(`❌ Attempt ${attempt} failed:`, error.message);
+      if (attempt <= retries) {
+        // Exponential backoff: wait 1s, then 2s
+        const waitTime = Math.pow(2, attempt - 1) * 1000;
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+
 
 
 
 
 
 async function forgotPassword({ email }, origin) {
-    const account = await Account.findOne({ email });
-    if (!account) return;
+    try {
+        const account = await Account.findOne({ email: email.toLowerCase().trim() });
+        if (!account) {
+            // Don't reveal if email exists for security
+            console.log(`Forgot password request for non-existent email: ${email}`);
+            return { success: true, message: 'If email exists, a reset link has been sent' };
+        }
 
-    // Invalidate any old token
-    account.resetToken = undefined;
+        // Create new 6-digit code as reset token
+        const resetCode = generateResetCode();
+        account.resetToken = {
+            token: resetCode,
+            expires: new Date(Date.now() + 24 * 60 * 60 * 1000) // expires in 24h
+        };
 
-    // Create new 6-digit code as reset token
-    const resetCode = generateResetCode();
-    account.resetToken = {
-        token: resetCode,
-        expires: new Date(Date.now() + 24 * 60 * 60 * 1000) // expires in 24h
-    };
+        await account.save();
 
-    await account.save();
+        // Send email with retry logic
+        await sendPasswordResetEmailWithRetry(account, origin);
 
-    await sendPasswordResetEmail(account, origin);
+        return { success: true, message: 'Password reset instructions sent' };
+    } catch (error) {
+        console.error('❌ Forgot password error:', error?.message || error);
+        throw error;
+    }
+}
+
+/**
+ * Send password reset email with retry logic
+ */
+async function sendPasswordResetEmailWithRetry(account, origin, retries = 2) {
+  for (let attempt = 1; attempt <= retries + 1; attempt++) {
+    try {
+      await sendPasswordResetEmail(account, origin);
+      console.log(`✅ Password reset email sent on attempt ${attempt}`);
+      return;
+    } catch (error) {
+      console.error(`❌ Attempt ${attempt} failed:`, error.message);
+      if (attempt <= retries) {
+        // Exponential backoff: wait 1s, then 2s
+        const waitTime = Math.pow(2, attempt - 1) * 1000;
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      } else {
+        throw error;
+      }
+    }
+  }
 }
 
 async function sendWelcomeEmail(account) {
@@ -372,15 +473,44 @@ async function sendVerificationEmail(account, origin) {
     let message;
     if (origin) {
         const verifyUrl = `${origin}/verify-email?token=${account.verificationToken}`;
-        message = `<p>Thanks for registering. Please click the link below to verify your email:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p>`;
+        message = `
+          <div style="background: white; padding: 20px; border-radius: 4px;">
+            <p>Thanks for registering! Please use the code below to verify your email:</p>
+            <div style="background: #f5f5f5; padding: 20px; border-radius: 4px; text-align: center; margin: 20px 0;">
+              <h1 style="color: #581845; letter-spacing: 4px; font-family: monospace; margin: 0;">${account.verificationToken}</h1>
+            </div>
+            <p>Or click the link below:</p>
+            <p><a href="${verifyUrl}" style="background: #581845; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">Verify Email</a></p>
+          </div>
+        `;
     } else {
-        message = `<p>Use this token to verify your email: <strong>${account.verificationToken}</strong></p>`;
+        message = `<div style="background: white; padding: 20px; border-radius: 4px;"><p>Use this code to verify your email:</p><h1 style="color: #581845; letter-spacing: 4px; font-family: monospace; text-align: center;">${account.verificationToken}</h1></div>`;
     }
 
     await sendEmail({
         to: account.email,
-        subject: 'Verify Email',
-        html: `<h4>Verify Email</h4>${message}`
+        subject: 'Verify Your Email - 34th Street',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          </head>
+          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 0;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+              <div style="background: linear-gradient(135deg, #581845 0%, #8B2E6C 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+                <h2 style="margin: 0;">Verify Your Email</h2>
+              </div>
+              ${message}
+              <div style="background: #f5f5f5; padding: 20px; border-radius: 0 0 8px 8px; text-align: center; font-size: 12px; color: #666;">
+                <p>This code expires in 10 minutes</p>
+                <p style="margin: 10px 0 0 0;">© 2024 34th Street. All rights reserved.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
     });
 }
 
@@ -388,15 +518,45 @@ async function sendPasswordResetEmail(account, origin) {
     let message;
     if (origin) {
         const resetUrl = `${origin}/reset-password?token=${account.resetToken.token}`;
-        message = `<p>Click the link below to reset your password:</p><p><a href="${resetUrl}">${resetUrl}</a></p>`;
+        message = `
+          <div style="background: white; padding: 20px; border-radius: 4px;">
+            <p>Someone (hopefully you) requested a password reset. Use the code below to reset your password:</p>
+            <div style="background: #f5f5f5; padding: 20px; border-radius: 4px; text-align: center; margin: 20px 0;">
+              <h1 style="color: #581845; letter-spacing: 4px; font-family: monospace; margin: 0;">${account.resetToken.token}</h1>
+            </div>
+            <p>Or click the link below:</p>
+            <p><a href="${resetUrl}" style="background: #581845; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">Reset Password</a></p>
+            <p style="color: #999; font-size: 12px;">If you didn't request this, please ignore this email.</p>
+          </div>
+        `;
     } else {
-        message = `<p>Use this token to reset your password: <strong>${account.resetToken.token}</strong></p>`;
+        message = `<div style="background: white; padding: 20px; border-radius: 4px;"><p>Use this code to reset your password:</p><h1 style="color: #581845; letter-spacing: 4px; font-family: monospace; text-align: center;">${account.resetToken.token}</h1></div>`;
     }
 
     await sendEmail({
         to: account.email,
-        subject: 'Reset Password',
-        html: `<h4>Reset Password</h4>${message}`
+        subject: 'Reset Your Password - 34th Street',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          </head>
+          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 0;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+              <div style="background: linear-gradient(135deg, #581845 0%, #8B2E6C 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+                <h2 style="margin: 0;">Reset Your Password</h2>
+              </div>
+              ${message}
+              <div style="background: #f5f5f5; padding: 20px; border-radius: 0 0 8px 8px; text-align: center; font-size: 12px; color: #666;">
+                <p>This code expires in 24 hours</p>
+                <p style="margin: 10px 0 0 0;">© 2024 34th Street. All rights reserved.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
     });
 }
 

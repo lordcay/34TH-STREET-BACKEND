@@ -12,6 +12,9 @@ router.get('/', authorize(), eventController.getEvents);
 // Get upcoming events
 router.get('/upcoming', authorize(), eventController.getUpcomingEvents);
 
+// Get past events (for reviews/trustworthiness)
+router.get('/past', authorize(), eventController.getPastEvents);
+
 // Get user's events (created by them)
 router.get('/my-events', authorize(), eventController.getMyEvents);
 
@@ -42,5 +45,16 @@ router.post('/:id/rsvp', authorize(), eventController.rsvpEvent);
 
 // Get event attendees
 router.get('/:id/attendees', authorize(), eventController.getAttendees);
+
+// ============ Comment Routes ============
+
+// Add a comment to an event (attendees/organizer only)
+router.post('/:id/comments', authorize(), eventController.addComment);
+
+// Get comments for an event
+router.get('/:id/comments', authorize(), eventController.getComments);
+
+// Delete a comment
+router.delete('/:id/comments/:commentId', authorize(), eventController.deleteComment);
 
 module.exports = router;

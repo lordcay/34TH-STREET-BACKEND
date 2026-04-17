@@ -9,7 +9,7 @@ const accountService = require('./account.service');
 const db = require('_helpers/db');
 const upload = require('../_middleware/upload');
 const jwt = require('jsonwebtoken');
-const config = require('../config.json');
+const config = require('../config.js');
 const Account = require('./account.model');
 const bcrypt = require('bcryptjs');
 const containsObjectionableContent = require('../utils/filterObjectionableContent');
@@ -22,6 +22,7 @@ router.post('/refresh-token', refreshToken);
 router.post('/revoke-token', authorize(), revokeTokenSchema, revokeToken);
 router.post('/register', registerSchema, register);
 router.post('/verify-email', verifyEmailSchema, verifyEmail);
+router.post('/resend-otp', resendOTPSchema, resendOTP);
 router.post('/forgot-password', forgotPasswordSchema, forgotPassword);
 router.post('/validate-reset-token', validateResetTokenSchema, validateResetToken);
 router.post('/reset-password', resetPasswordSchema, resetPassword);
@@ -205,6 +206,27 @@ function verifyEmail(req, res, next) {
         .catch(next);
 }
 
+function resendOTPSchema(req, res, next) {
+    const schema = Joi.object({
+        email: Joi.string().email().required()
+    });
+    validateRequest(req, next, schema);
+}
+
+async function resendOTP(req, res, next) {
+    try {
+        const result = await accountService.resendOTP(req.body, req.get('origin'));
+        return res.status(200).json({
+            message: 'OTP sent successfully',
+            email: result.email,
+            otpSent: true
+        });
+    } catch (err) {
+        console.error('Resend OTP error:', err?.message || err);
+        return res.status(400).json({ message: err.toString() || 'Failed to resend OTP' });
+    }
+}
+
 
 
 function getVerifiedUsers(req, res, next) {
@@ -244,7 +266,10 @@ function forgotPasswordSchema(req, res, next) {
 
 function forgotPassword(req, res, next) {
     accountService.forgotPassword(req.body, req.get('origin'))
-        .then(() => res.json({ message: 'Please check your email for password reset instructions' }))
+        .then((result) => res.json({ 
+            message: result.message || 'Please check your email for password reset instructions',
+            success: result.success 
+        }))
         .catch(next);
 }
 
@@ -285,7 +310,17 @@ function getAll(req, res, next) {
 function getById(req, res, next) {
     
     accountService.getById(req.params.id)
-        .then(account => account ? res.json({ user: account }) : res.sendStatus(404))  // ✅ wrap it!
+        .then(account => {
+            if (!account) return res.sendStatus(404);
+            const data = account.toJSON ? account.toJSON() : { ...account };
+            // Strip exact coordinates for privacy — only expose city name
+            delete data.location;
+            if (data.locationSharingEnabled === false) {
+                data.currentCity = '';
+                data.locationUpdatedAt = null;
+            }
+            return res.json({ user: data });
+        })
         .catch(next);
 
 

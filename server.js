@@ -1,5 +1,6 @@
 ﻿
 
+require('dotenv').config();
 require('rootpath')();
 const express = require('express');
 const app = express();
@@ -84,9 +85,18 @@ app.use('/connections', require('./connections/connection.controller'));
 
 // � Events routes
 app.use('/events', require('./events/event.routes'));
-
+// 🛠️ Services routes
+app.use('/services', require('./services/service.routes'));
 // �🔔 Notification routes
-app.use('/notifications', require('./notifications/notification.controller'));
+app.use('/notifications', require('./notifications/notification.controller'));// 🏫 School Not Listed requests
+app.use('/school-requests', require('./schoolRequests/schoolRequest.controller'));
+// 🎓 Alumni / Professional requests
+app.use('/alumni-requests', require('./alumniRequests/alumniRequest.controller'));
+
+// Health check endpoint for Render / uptime monitors
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', uptime: process.uptime() });
+});
 
 app.use(errorHandler);
 
@@ -96,6 +106,10 @@ const connectedUsers = {};
 
 // ✅ In-memory store for active calls
 const activeCalls = {};
+
+// ✅ In-memory store for call ring timeouts (auto-end unanswered calls)
+const callTimeouts = {};
+const CALL_RING_TIMEOUT = 50000; // 50 seconds server-side (slightly longer than client 45s)
 
 // ✅ In-memory store for user activity timestamps (for inactive detection)
 const userActivityTimestamps = {};
@@ -327,8 +341,14 @@ socket.on('stopTyping', ({ chatroomId, userId, senderName }) => {
         
         // Clean up any active call for this user
         if (disconnectedUserId && activeCalls[disconnectedUserId]) {
-            const { peerId } = activeCalls[disconnectedUserId];
+            const { peerId, callId } = activeCalls[disconnectedUserId];
             const peerSocketId = connectedUsers[peerId];
+            
+            // Clear ring timeout
+            if (callId && callTimeouts[callId]) {
+                clearTimeout(callTimeouts[callId]);
+                delete callTimeouts[callId];
+            }
             
             // Notify the peer that the call ended due to disconnect
             if (peerSocketId) {
@@ -392,6 +412,12 @@ socket.on('call:initiate', ({ callerId, callerName, callerPhoto, calleeId, callT
     return;
   }
   
+  // Check if caller is already in a call
+  if (activeCalls[callerId]) {
+    socket.emit('call:busy', { calleeId: callerId });
+    return;
+  }
+  
   // Mark both users as in a call
   const callId = `${callerId}_${calleeId}_${Date.now()}`;
   activeCalls[callerId] = { callId, peerId: calleeId, callType };
@@ -405,6 +431,35 @@ socket.on('call:initiate', ({ callerId, callerName, callerPhoto, calleeId, callT
     callerPhoto,
     callType,
   });
+  
+  // Server-side ring timeout — auto-end if not answered
+  callTimeouts[callId] = setTimeout(() => {
+    // Check if call is still pending (not yet accepted)
+    if (activeCalls[callerId]?.callId === callId && activeCalls[calleeId]?.callId === callId) {
+      console.log(`⏰ Call timeout: ${callId}`);
+      
+      // Notify caller
+      const callerSocketId = connectedUsers[callerId];
+      if (callerSocketId) {
+        io.to(callerSocketId).emit('call:unavailable', { 
+          calleeId, 
+          reason: 'No answer' 
+        });
+      }
+      
+      // Notify callee
+      if (connectedUsers[calleeId]) {
+        io.to(connectedUsers[calleeId]).emit('call:ended', { 
+          endedBy: callerId, 
+          reason: 'Missed call' 
+        });
+      }
+      
+      delete activeCalls[callerId];
+      delete activeCalls[calleeId];
+    }
+    delete callTimeouts[callId];
+  }, CALL_RING_TIMEOUT);
 });
 
 // WebRTC offer (SDP)
@@ -434,6 +489,14 @@ socket.on('call:ice-candidate', ({ peerId, candidate }) => {
 // Accept call
 socket.on('call:accept', ({ callerId, calleeId }) => {
   console.log(`✅ Call accepted: ${calleeId} accepted call from ${callerId}`);
+  
+  // Clear ring timeout
+  const callData = activeCalls[callerId];
+  if (callData?.callId && callTimeouts[callData.callId]) {
+    clearTimeout(callTimeouts[callData.callId]);
+    delete callTimeouts[callData.callId];
+  }
+  
   const callerSocketId = connectedUsers[callerId];
   if (callerSocketId) {
     io.to(callerSocketId).emit('call:accepted', { calleeId });
@@ -443,6 +506,13 @@ socket.on('call:accept', ({ callerId, calleeId }) => {
 // Reject call
 socket.on('call:reject', ({ callerId, calleeId, reason }) => {
   console.log(`❌ Call rejected: ${calleeId} rejected call from ${callerId}`);
+  
+  // Clear ring timeout
+  const callData = activeCalls[callerId];
+  if (callData?.callId && callTimeouts[callData.callId]) {
+    clearTimeout(callTimeouts[callData.callId]);
+    delete callTimeouts[callData.callId];
+  }
   
   // Clean up active calls
   delete activeCalls[callerId];
@@ -460,6 +530,13 @@ socket.on('call:reject', ({ callerId, calleeId, reason }) => {
 // End call
 socket.on('call:end', ({ peerId, endedBy }) => {
   console.log(`📴 Call ended by ${endedBy}`);
+  
+  // Clear ring timeout
+  const callData = activeCalls[endedBy];
+  if (callData?.callId && callTimeouts[callData.callId]) {
+    clearTimeout(callTimeouts[callData.callId]);
+    delete callTimeouts[callData.callId];
+  }
   
   // Clean up active calls
   delete activeCalls[endedBy];
@@ -510,6 +587,36 @@ app.set('connectedUsers', connectedUsers);
 const port = process.env.NODE_ENV === 'production' ? (process.env.PORT || 80) : 4000;
 server.listen(port, () => {
     console.log(`🚀 Server listening on http://localhost:${port}`);
+});
+
+// ✅ Graceful shutdown — close connections cleanly on deploy/restart
+const shutdown = (signal) => {
+    console.log(`\n⏳ ${signal} received — shutting down gracefully...`);
+    server.close(() => {
+        console.log('✅ HTTP server closed');
+        const mongoose = require('mongoose');
+        mongoose.connection.close(false).then(() => {
+            console.log('✅ MongoDB connection closed');
+            process.exit(0);
+        });
+    });
+    // Force exit after 10s if graceful shutdown stalls
+    setTimeout(() => {
+        console.error('❌ Forced shutdown after timeout');
+        process.exit(1);
+    }, 10000);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// ✅ Catch unhandled rejections to prevent crash loops
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('⚠️ Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+    console.error('⚠️ Uncaught Exception:', err);
+    shutdown('uncaughtException');
 });
 
 

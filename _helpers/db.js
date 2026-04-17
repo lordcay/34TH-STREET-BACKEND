@@ -26,13 +26,10 @@
 
 
 
-const config = require('config.json');
+const config = require('config.js');
 const mongoose = require('mongoose');
 
-mongoose.connect(process.env.MONGODB_URI || config.connectionString, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-});
+mongoose.connect(process.env.MONGODB_URI || config.connectionString);
 mongoose.Promise = global.Promise;
 
 module.exports = {
@@ -50,6 +47,15 @@ module.exports = {
 
   // 🤝 Connections
   Connection: require('../connections/connection.model'),
+
+  // 🛠️ Services
+  Service: require('../services/service.model'),
+
+  // 🏫 School Not Listed Requests
+  SchoolRequest: require('../schoolRequests/schoolRequest.model'),
+
+  // 🎓 Alumni / Professional Requests
+  AlumniRequest: require('../alumniRequests/alumniRequest.model'),
 
   // Utils
   isValidId

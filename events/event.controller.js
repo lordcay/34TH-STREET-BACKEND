@@ -1,10 +1,12 @@
 // events/event.controller.js
 const Event = require('./event.model');
+const Connection = require('../connections/connection.model');
 
 // Export all controller functions
 module.exports = {
   getEvents,
   getUpcomingEvents,
+  getPastEvents,
   getMyEvents,
   getAttendingEvents,
   searchEvents,
@@ -13,7 +15,10 @@ module.exports = {
   updateEvent,
   deleteEvent,
   rsvpEvent,
-  getAttendees
+  getAttendees,
+  addComment,
+  getComments,
+  deleteComment
 };
 
 // ==================== Controller Functions ====================
@@ -28,16 +33,25 @@ async function getEvents(req, res, next) {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     
     const events = await Event.find(query)
-      .populate('createdBy', 'firstName lastName profilePicture')
+      .populate('createdBy', 'firstName lastName photos')
       .sort({ date: 1 })
       .skip(skip)
       .limit(parseInt(limit));
     
     const total = await Event.countDocuments(query);
     
+    // Enrich events with isAttending for the current user
+    const enrichedEvents = events.map(e => {
+      const ev = e.toJSON();
+      ev.isAttending = req.user ? (ev.attendees || []).some(
+        a => String(a.userId) === req.user.id && a.status === 'going'
+      ) : false;
+      return ev;
+    });
+
     res.json({
       success: true,
-      data: events,
+      data: enrichedEvents,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -60,7 +74,7 @@ async function getUpcomingEvents(req, res, next) {
       status: 'published',
       date: { $gte: new Date() }
     })
-      .populate('createdBy', 'firstName lastName profilePicture')
+      .populate('createdBy', 'firstName lastName photos')
       .sort({ date: 1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -71,14 +85,68 @@ async function getUpcomingEvents(req, res, next) {
       date: { $gte: new Date() }
     });
     
+    // Enrich events with isAttending for the current user
+    const enrichedEvents = events.map(e => {
+      const ev = e.toJSON();
+      ev.isAttending = (ev.attendees || []).some(
+        a => String(a.userId) === req.user.id && a.status === 'going'
+      );
+      return ev;
+    });
+
     res.json({
       success: true,
-      data: events,
+      data: enrichedEvents,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
         total,
         pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getPastEvents(req, res, next) {
+  try {
+    const { limit = 20, page = 1 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const events = await Event.find({
+      isDeleted: false,
+      status: { $in: ['published', 'completed'] },
+      date: { $lt: new Date() }
+    })
+      .populate('createdBy', 'firstName lastName photos')
+      .sort({ date: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+    
+    const total = await Event.countDocuments({
+      isDeleted: false,
+      status: { $in: ['published', 'completed'] },
+      date: { $lt: new Date() }
+    });
+    
+    const enrichedEvents = events.map(e => {
+      const ev = e.toJSON();
+      ev.isAttending = (ev.attendees || []).some(
+        a => String(a.userId) === req.user.id && a.status === 'going'
+      );
+      return ev;
+    });
+
+    res.json({
+      success: true,
+      data: enrichedEvents,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit)),
+        hasMore: skip + events.length < total
       }
     });
   } catch (error) {
@@ -95,7 +163,7 @@ async function getMyEvents(req, res, next) {
       createdBy: req.user.id,
       isDeleted: false
     })
-      .populate('createdBy', 'firstName lastName profilePicture')
+      .populate('createdBy', 'firstName lastName photos')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -105,9 +173,18 @@ async function getMyEvents(req, res, next) {
       isDeleted: false
     });
     
+    // Enrich events with isAttending for the current user
+    const enrichedEvents = events.map(e => {
+      const ev = e.toJSON();
+      ev.isAttending = (ev.attendees || []).some(
+        a => String(a.userId) === req.user.id && a.status === 'going'
+      );
+      return ev;
+    });
+
     res.json({
       success: true,
-      data: events,
+      data: enrichedEvents,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -131,7 +208,7 @@ async function getAttendingEvents(req, res, next) {
       'attendees.userId': req.user.id,
       'attendees.status': 'going'
     })
-      .populate('createdBy', 'firstName lastName profilePicture')
+      .populate('createdBy', 'firstName lastName photos')
       .sort({ date: 1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -143,9 +220,16 @@ async function getAttendingEvents(req, res, next) {
       'attendees.status': 'going'
     });
     
+    // These events are already filtered to attending, but set the flag explicitly
+    const enrichedEvents = events.map(e => {
+      const ev = e.toJSON();
+      ev.isAttending = true;
+      return ev;
+    });
+
     res.json({
       success: true,
-      data: events,
+      data: enrichedEvents,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -180,7 +264,7 @@ async function searchEvents(req, res, next) {
     }
     
     const events = await Event.find(query)
-      .populate('createdBy', 'firstName lastName profilePicture')
+      .populate('createdBy', 'firstName lastName photos')
       .sort({ date: 1 })
       .limit(parseInt(limit));
     
@@ -199,8 +283,8 @@ async function getEventById(req, res, next) {
       _id: req.params.id,
       isDeleted: false
     })
-      .populate('createdBy', 'firstName lastName profilePicture email')
-      .populate('attendees.userId', 'firstName lastName profilePicture email');
+      .populate('createdBy', 'firstName lastName photos email')
+      .populate('attendees.userId', 'firstName lastName photos email');
     
     if (!event) {
       return res.status(404).json({ success: false, message: 'Event not found' });
@@ -211,23 +295,75 @@ async function getEventById(req, res, next) {
     const isAttending = attendeesArray.some(
       a => a.userId && a.userId._id && a.userId._id.toString() === req.user.id && a.status === 'going'
     );
+
+    const currentUserId = req.user.id;
+    const isOrganizer = event.createdBy._id.toString() === currentUserId;
+
+    // Filter attendees by visibility (organizer sees all)
+    let visibleAttendees = attendeesArray.filter(a => a.status === 'going');
+    if (!isOrganizer) {
+      const userConnections = await Connection.find({
+        $or: [
+          { requester: currentUserId, status: 'connected' },
+          { target: currentUserId, status: 'connected' }
+        ]
+      }).lean();
+      const connectedIds = new Set(userConnections.map(c =>
+        String(c.requester) === String(currentUserId) ? String(c.target) : String(c.requester)
+      ));
+
+      visibleAttendees = visibleAttendees.filter(a => {
+        const attendeeId = String(a.userId?._id || a.userId);
+        if (attendeeId === String(currentUserId)) return true;
+        const vis = a.visibility || 'everyone';
+        if (vis === 'everyone') return true;
+        if (vis === 'connections') return connectedIds.has(attendeeId);
+        return false;
+      });
+    }
     
-    // Format attendees for response
-    const formattedAttendees = attendeesArray
-      .filter(a => a.status === 'going')
-      .map(a => ({
-        user: a.userId,
-        status: a.status,
-        respondedAt: a.respondedAt
-      }));
+    // Format attendees for response — enrich with connection data
+    const formattedAttendees = await Promise.all(
+      visibleAttendees.map(async (a) => {
+          const attendeeId = a.userId?._id;
+          let connectionStatus = 'none';
+          let connectionCount = 0;
+
+          if (attendeeId) {
+            const [connStatus, count] = await Promise.all([
+              String(attendeeId) !== String(currentUserId)
+                ? Connection.getStatus(currentUserId, attendeeId)
+                : Promise.resolve('self'),
+              Connection.countDocuments({
+                $or: [
+                  { requester: attendeeId, status: 'connected' },
+                  { target: attendeeId, status: 'connected' },
+                ],
+              }),
+            ]);
+            connectionStatus = connStatus;
+            connectionCount = count;
+          }
+
+          return {
+            user: a.userId,
+            status: a.status,
+            visibility: a.visibility || 'everyone',
+            respondedAt: a.respondedAt,
+            connectionStatus,
+            connectionCount,
+          };
+        })
+    );
     
     res.json({
       success: true,
       data: {
         ...event.toJSON(),
         attendees: formattedAttendees,
+        attendeeCount: event.attendeeCount,
         isAttending,
-        isOrganizer: event.createdBy._id.toString() === req.user.id
+        isOrganizer
       }
     });
   } catch (error) {
@@ -250,6 +386,7 @@ async function createEvent(req, res, next) {
       coordinates,
       isOnline,
       meetingLink,
+      photos,
       image,
       imageUrl,
       expectedAttendees,
@@ -262,6 +399,12 @@ async function createEvent(req, res, next) {
         success: false, 
         message: 'Title, description, and date are required' 
       });
+    }
+
+    // Sanitize photos array (max 3 Cloudinary URLs)
+    let sanitizedPhotos = [];
+    if (Array.isArray(photos)) {
+      sanitizedPhotos = photos.filter(p => typeof p === 'string' && p.startsWith('https://')).slice(0, 3);
     }
     
     const event = new Event({
@@ -278,17 +421,18 @@ async function createEvent(req, res, next) {
       coordinates: coordinates || { type: 'Point', coordinates: [0, 0] },
       isOnline,
       meetingLink,
-      image,
-      imageUrl: imageUrl || image,
+      photos: sanitizedPhotos,
+      image: image || sanitizedPhotos[0] || null,
+      imageUrl: imageUrl || image || sanitizedPhotos[0] || null,
       expectedAttendees: expectedAttendees || 50,
       maxAttendees,
-      attendees: [{ userId: req.user.id, status: 'going' }],
-      attendeeCount: 1
+      attendees: [],
+      attendeeCount: 0
     });
     
     await event.save();
     
-    await event.populate('createdBy', 'firstName lastName profilePicture');
+    await event.populate('createdBy', 'firstName lastName photos');
     
     res.status(201).json({
       success: true,
@@ -319,13 +463,22 @@ async function updateEvent(req, res, next) {
     const allowedUpdates = [
       'title', 'description', 'category', 'date', 'startDate', 'endDate',
       'venueName', 'fullAddress', 'location', 'coordinates', 'isOnline',
-      'meetingLink', 'image', 'imageUrl', 'expectedAttendees', 'maxAttendees', 'status'
+      'meetingLink', 'photos', 'image', 'imageUrl', 'expectedAttendees', 'maxAttendees', 'status'
     ];
     
     allowedUpdates.forEach(field => {
       if (req.body[field] !== undefined) {
         if (field === 'date' || field === 'startDate' || field === 'endDate') {
           event[field] = req.body[field] ? new Date(req.body[field]) : null;
+        } else if (field === 'photos') {
+          // Sanitize photos array (max 3 Cloudinary URLs)
+          const photos = req.body[field];
+          if (Array.isArray(photos)) {
+            event.photos = photos.filter(p => typeof p === 'string' && p.startsWith('https://')).slice(0, 3);
+            // Sync legacy fields
+            event.image = event.photos[0] || null;
+            event.imageUrl = event.photos[0] || null;
+          }
         } else {
           event[field] = req.body[field];
         }
@@ -333,7 +486,7 @@ async function updateEvent(req, res, next) {
     });
     
     await event.save();
-    await event.populate('createdBy', 'firstName lastName profilePicture');
+    await event.populate('createdBy', 'firstName lastName photos');
     
     res.json({
       success: true,
@@ -375,10 +528,14 @@ async function deleteEvent(req, res, next) {
 
 async function rsvpEvent(req, res, next) {
   try {
-    const { status = 'going' } = req.body;
+    const { status = 'going', visibility = 'everyone' } = req.body;
     
     if (!['going', 'interested', 'not_going'].includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid RSVP status' });
+    }
+
+    if (!['everyone', 'connections', 'private'].includes(visibility)) {
+      return res.status(400).json({ success: false, message: 'Invalid visibility option' });
     }
     
     const event = await Event.findOne({
@@ -412,6 +569,7 @@ async function rsvpEvent(req, res, next) {
       } else {
         // Update RSVP
         event.attendees[existingIndex].status = status;
+        event.attendees[existingIndex].visibility = visibility;
         event.attendees[existingIndex].respondedAt = new Date();
       }
     } else if (status !== 'not_going') {
@@ -419,6 +577,7 @@ async function rsvpEvent(req, res, next) {
       event.attendees.push({
         userId: req.user.id,
         status,
+        visibility,
         respondedAt: new Date()
       });
     }
@@ -439,7 +598,8 @@ async function rsvpEvent(req, res, next) {
                'RSVP removed',
       data: {
         status,
-        attendeeCount: event.attendeeCount
+        attendeeCount: event.attendeeCount,
+        isAttending: status === 'going'
       }
     });
   } catch (error) {
@@ -454,7 +614,7 @@ async function getAttendees(req, res, next) {
     const event = await Event.findOne({
       _id: req.params.id,
       isDeleted: false
-    }).populate('attendees.userId', 'firstName lastName profilePicture');
+    }).populate('attendees.userId', 'firstName lastName photos');
     
     if (!event) {
       return res.status(404).json({ success: false, message: 'Event not found' });
@@ -465,17 +625,236 @@ async function getAttendees(req, res, next) {
       attendees = attendees.filter(a => a.status === status);
     }
     
+    const currentUserId = req.user?.id;
+    const isOrganizer = String(event.createdBy) === String(currentUserId) ||
+                        String(event.createdBy?._id) === String(currentUserId);
+
+    // Visibility filtering: organizer sees everyone
+    // Other users see based on each attendee's visibility preference
+    if (!isOrganizer && currentUserId) {
+      // Get current user's connections for filtering
+      const userConnections = await Connection.find({
+        $or: [
+          { requester: currentUserId, status: 'connected' },
+          { target: currentUserId, status: 'connected' }
+        ]
+      }).lean();
+      
+      const connectedIds = new Set(userConnections.map(c => 
+        String(c.requester) === String(currentUserId) 
+          ? String(c.target) 
+          : String(c.requester)
+      ));
+
+      attendees = attendees.filter(a => {
+        const attendeeId = String(a.userId?._id || a.userId);
+        // Always show user themselves
+        if (attendeeId === String(currentUserId)) return true;
+        
+        const vis = a.visibility || 'everyone';
+        if (vis === 'everyone') return true;
+        if (vis === 'connections') return connectedIds.has(attendeeId);
+        // vis === 'private' → hidden from non-organizers
+        return false;
+      });
+    }
+    
+    const totalVisible = attendees.length;
     attendees = attendees.slice(0, parseInt(limit));
+    
+    // Enrich attendees with connection data
+    const enrichedAttendees = await Promise.all(
+      attendees.map(async (a) => {
+        const attendeeId = a.userId?._id;
+        let connectionStatus = 'none';
+        let connectionCount = 0;
+
+        if (attendeeId && currentUserId) {
+          const [connStatus, count] = await Promise.all([
+            String(attendeeId) !== String(currentUserId)
+              ? Connection.getStatus(currentUserId, attendeeId)
+              : Promise.resolve('self'),
+            Connection.countDocuments({
+              $or: [
+                { requester: attendeeId, status: 'connected' },
+                { target: attendeeId, status: 'connected' },
+              ],
+            }),
+          ]);
+          connectionStatus = connStatus;
+          connectionCount = count;
+        }
+
+        return {
+          user: a.userId,
+          status: a.status,
+          visibility: a.visibility || 'everyone',
+          respondedAt: a.respondedAt,
+          connectionStatus,
+          connectionCount,
+        };
+      })
+    );
     
     res.json({
       success: true,
-      data: attendees.map(a => ({
-        user: a.userId,
-        status: a.status,
-        respondedAt: a.respondedAt
-      })),
-      total: event.attendees.filter(a => a.status === status).length
+      data: enrichedAttendees,
+      total: totalVisible
     });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ==================== Comment Functions ====================
+
+async function addComment(req, res, next) {
+  try {
+    const { text, rating } = req.body;
+    const userId = req.user.id;
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({ success: false, message: 'Comment text is required' });
+    }
+
+    if (text.trim().length > 1000) {
+      return res.status(400).json({ success: false, message: 'Comment must be 1000 characters or fewer' });
+    }
+
+    if (rating !== undefined && (rating < 1 || rating > 5 || !Number.isInteger(rating))) {
+      return res.status(400).json({ success: false, message: 'Rating must be an integer between 1 and 5' });
+    }
+
+    const event = await Event.findOne({ _id: req.params.id, isDeleted: false });
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Event not found' });
+    }
+
+    // Only attendees (status: 'going') or the organizer can comment
+    const isOrganizer = String(event.createdBy) === userId;
+    const isAttendee = event.attendees.some(
+      a => String(a.userId) === userId && a.status === 'going'
+    );
+
+    if (!isAttendee && !isOrganizer) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only attendees or the organizer can comment on this event'
+      });
+    }
+
+    const comment = {
+      userId,
+      text: text.trim(),
+      rating: rating || undefined,
+      createdAt: new Date()
+    };
+
+    event.comments.push(comment);
+    event.commentCount = event.comments.length;
+    await event.save();
+
+    // Return the saved comment with populated user
+    const savedComment = event.comments[event.comments.length - 1];
+    await event.populate('comments.userId', 'firstName lastName photos');
+    const populated = event.comments.id(savedComment._id);
+
+    res.status(201).json({
+      success: true,
+      message: 'Comment added successfully',
+      data: {
+        _id: populated._id,
+        user: populated.userId,
+        text: populated.text,
+        rating: populated.rating,
+        createdAt: populated.createdAt
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getComments(req, res, next) {
+  try {
+    const { limit = 20, page = 1 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const event = await Event.findOne({ _id: req.params.id, isDeleted: false })
+      .populate('comments.userId', 'firstName lastName photos');
+
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Event not found' });
+    }
+
+    // Sort comments newest first
+    const allComments = (event.comments || []).sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+
+    const total = allComments.length;
+    const paged = allComments.slice(skip, skip + parseInt(limit));
+
+    const comments = paged.map(c => ({
+      _id: c._id,
+      user: c.userId,
+      text: c.text,
+      rating: c.rating,
+      createdAt: c.createdAt
+    }));
+
+    // Compute average rating
+    const rated = allComments.filter(c => c.rating);
+    const averageRating = rated.length > 0
+      ? +(rated.reduce((sum, c) => sum + c.rating, 0) / rated.length).toFixed(1)
+      : 0;
+
+    res.json({
+      success: true,
+      data: comments,
+      averageRating,
+      total,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit)),
+        hasMore: skip + paged.length < total
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function deleteComment(req, res, next) {
+  try {
+    const { id, commentId } = req.params;
+    const userId = req.user.id;
+
+    const event = await Event.findOne({ _id: id, isDeleted: false });
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Event not found' });
+    }
+
+    const comment = event.comments.id(commentId);
+    if (!comment) {
+      return res.status(404).json({ success: false, message: 'Comment not found' });
+    }
+
+    // Only the commenter or the organizer can delete
+    const isCommentOwner = String(comment.userId) === userId;
+    const isOrganizer = String(event.createdBy) === userId;
+
+    if (!isCommentOwner && !isOrganizer) {
+      return res.status(403).json({ success: false, message: 'Not authorized to delete this comment' });
+    }
+
+    event.comments.pull(commentId);
+    event.commentCount = event.comments.length;
+    await event.save();
+
+    res.json({ success: true, message: 'Comment deleted successfully' });
   } catch (error) {
     next(error);
   }

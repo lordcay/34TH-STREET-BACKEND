@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: 34th-street-backend
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CONNECTION_STRING
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.sendgrid.net
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        value: apikey
+      - key: SMTP_PASS
+        sync: false
+      - key: REPORT_EMAIL
+        sync: false
+      - key: REPORT_EMAIL_PASSWORD
+        sync: false
+      - key: ADMIN_NOTIFICATION_EMAIL
+        sync: false
