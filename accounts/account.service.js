@@ -36,11 +36,18 @@ module.exports = {
     getVerifiedUsers,
     create,
     update,
-    delete: _delete
+    delete: _delete,
+    sendRecoveryOtp,
+    verifyRecoveryOtp,
+    dismissRecoveryReminder
 };
 
 async function authenticate({ email, password, ipAddress }) {
-    const account = await Account.findOne({ email });
+    // Try primary email first, then recovery email
+    let account = await Account.findOne({ email });
+    if (!account) {
+        account = await Account.findOne({ recoveryEmail: email, recoveryEmailVerified: true });
+    }
 
     if (!account || !account.isVerified || !(await bcrypt.compare(password, account.passwordHash))) {
         throw 'Email or password is incorrect';
@@ -443,6 +450,8 @@ function basicDetails(account) {
     locationUpdatedAt, locationSharingEnabled,
     // 🔴 Presence fields
     onlineStatus, lastSeen, lastActivity,
+    // Recovery email
+    recoveryEmail, recoveryEmailVerified, recoveryEmailDismissedAt,
 
     } = account;
 
@@ -461,6 +470,10 @@ function basicDetails(account) {
     onlineStatus: onlineStatus || 'offline',
     lastSeen: lastSeen || null,
     lastActivity: lastActivity || null,
+    // Recovery email
+    recoveryEmail: recoveryEmail || null,
+    recoveryEmailVerified: recoveryEmailVerified || false,
+    recoveryEmailDismissedAt: recoveryEmailDismissedAt || null,
 
     };
     
@@ -563,6 +576,115 @@ async function sendPasswordResetEmail(account, origin) {
 
 function generateResetCode() {
     return Math.floor(100000 + Math.random() * 900000).toString(); // Generates 6-digit string
+}
+
+
+// ─── Recovery Email OTP ───────────────────────────────────────
+
+async function sendRecoveryOtp({ userId, recoveryEmail }) {
+    const account = await Account.findById(userId);
+    if (!account) throw 'Account not found';
+
+    // Ensure recovery email is not already used as a primary email by another account
+    const existing = await Account.findOne({ email: recoveryEmail });
+    if (existing && String(existing._id) !== String(account._id)) {
+        throw 'This email is already registered as a primary email';
+    }
+
+    // Check if another account already uses this as recovery email
+    const existingRecovery = await Account.findOne({
+        recoveryEmail,
+        recoveryEmailVerified: true,
+        _id: { $ne: account._id }
+    });
+    if (existingRecovery) {
+        throw 'This email is already used as a recovery email by another account';
+    }
+
+    // Rate limit: 30 seconds
+    if (account.recoveryOtpExpires && account.recoveryOtp) {
+        const timeSinceSent = Date.now() - (account.recoveryOtpExpires.getTime() - 10 * 60 * 1000);
+        if (timeSinceSent < 30000) {
+            const waitSec = Math.ceil((30000 - timeSinceSent) / 1000);
+            throw `Please wait ${waitSec} seconds before requesting another OTP`;
+        }
+    }
+
+    const otp = generateResetCode();
+    account.recoveryOtp = otp;
+    account.recoveryOtpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    account.recoveryEmail = recoveryEmail;
+    account.recoveryEmailVerified = false;
+    await account.save();
+
+    // Send OTP to recovery email
+    await sendEmail({
+        to: recoveryEmail,
+        subject: 'Verify Your Recovery Email - 34th Street',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 0;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+              <div style="background: linear-gradient(135deg, #581845 0%, #8B2E6C 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+                <h2 style="margin: 0;">Verify Recovery Email</h2>
+              </div>
+              <div style="background: white; padding: 20px; border-radius: 4px;">
+                <p>Hi ${account.firstName},</p>
+                <p>You're setting up <strong>${recoveryEmail}</strong> as your recovery email. Use the code below to verify:</p>
+                <div style="background: #f5f5f5; padding: 20px; border-radius: 4px; text-align: center; margin: 20px 0;">
+                  <h1 style="color: #581845; letter-spacing: 4px; font-family: monospace; margin: 0;">${otp}</h1>
+                </div>
+                <p style="color: #666; font-size: 13px;">This code expires in 10 minutes. If you didn't request this, please ignore this email.</p>
+              </div>
+              <div style="background: #f5f5f5; padding: 15px; border-radius: 0 0 8px 8px; text-align: center; font-size: 12px; color: #666;">
+                <p style="margin: 0;">&copy; ${new Date().getFullYear()} 34th Street. All rights reserved.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+    });
+
+    return { success: true, message: 'OTP sent to recovery email' };
+}
+
+async function verifyRecoveryOtp({ userId, otp }) {
+    const account = await Account.findById(userId);
+    if (!account) throw 'Account not found';
+
+    if (!account.recoveryOtp || !account.recoveryOtpExpires) {
+        throw 'No pending recovery email verification';
+    }
+
+    if (Date.now() > account.recoveryOtpExpires.getTime()) {
+        account.recoveryOtp = null;
+        account.recoveryOtpExpires = null;
+        await account.save();
+        throw 'OTP has expired. Please request a new one';
+    }
+
+    if (account.recoveryOtp !== otp) {
+        throw 'Invalid OTP';
+    }
+
+    account.recoveryEmailVerified = true;
+    account.recoveryOtp = null;
+    account.recoveryOtpExpires = null;
+    await account.save();
+
+    return { success: true, message: 'Recovery email verified', user: basicDetails(account) };
+}
+
+async function dismissRecoveryReminder({ userId }) {
+    const account = await Account.findById(userId);
+    if (!account) throw 'Account not found';
+
+    account.recoveryEmailDismissedAt = new Date();
+    await account.save();
+
+    return { success: true, user: basicDetails(account) };
 }
 
 

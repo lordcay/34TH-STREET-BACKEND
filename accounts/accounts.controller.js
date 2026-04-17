@@ -40,6 +40,11 @@ router.get('/:id/presence', authorize(), getUserPresence);
 router.get('/me/onboarding', authorize(), getOnboardingState);
 router.patch('/me/onboarding', authorize(), updateOnboardingState);
 
+// Recovery email
+router.post('/recovery-email/send-otp', authorize(), sendRecoveryOtp);
+router.post('/recovery-email/verify-otp', authorize(), verifyRecoveryOtp);
+router.post('/recovery-email/dismiss', authorize(), dismissRecoveryReminder);
+
 
 
 router.post('/', authorize(Role.Admin), createSchema, create);
@@ -613,6 +618,57 @@ async function updateOnboardingState(req, res, next) {
 
         if (!account) return res.status(404).json({ message: 'Account not found' });
         res.json({ completedScreens: account.onboardingCompleted });
+    } catch (err) {
+        next(err);
+    }
+}
+
+// ─── Recovery Email ───────────────────────────────────────
+
+async function sendRecoveryOtp(req, res, next) {
+    try {
+        const { recoveryEmail } = req.body;
+        if (!recoveryEmail || typeof recoveryEmail !== 'string') {
+            return res.status(400).json({ message: 'Recovery email is required' });
+        }
+        // Basic email format check
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recoveryEmail)) {
+            return res.status(400).json({ message: 'Invalid email format' });
+        }
+        const result = await accountService.sendRecoveryOtp({
+            userId: req.user.id,
+            recoveryEmail: recoveryEmail.toLowerCase().trim()
+        });
+        res.json(result);
+    } catch (err) {
+        if (typeof err === 'string') return res.status(400).json({ message: err });
+        next(err);
+    }
+}
+
+async function verifyRecoveryOtp(req, res, next) {
+    try {
+        const { otp } = req.body;
+        if (!otp || typeof otp !== 'string' || otp.length !== 6) {
+            return res.status(400).json({ message: 'A 6-digit OTP is required' });
+        }
+        const result = await accountService.verifyRecoveryOtp({
+            userId: req.user.id,
+            otp: otp.trim()
+        });
+        res.json(result);
+    } catch (err) {
+        if (typeof err === 'string') return res.status(400).json({ message: err });
+        next(err);
+    }
+}
+
+async function dismissRecoveryReminder(req, res, next) {
+    try {
+        const result = await accountService.dismissRecoveryReminder({
+            userId: req.user.id
+        });
+        res.json(result);
     } catch (err) {
         next(err);
     }

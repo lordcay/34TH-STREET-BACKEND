@@ -55,6 +55,14 @@ const schema = new Schema({
     funFact: { type: String },
     rship: { type: String },
     welcomeEmailSent: { type: Boolean, default: false },
+
+    // Recovery email (personal email for login after graduation)
+    recoveryEmail: { type: String, default: null },
+    recoveryEmailVerified: { type: Boolean, default: false },
+    recoveryOtp: { type: String, default: null },
+    recoveryOtpExpires: { type: Date, default: null },
+    recoveryEmailDismissedAt: { type: Date, default: null },
+
     role: { type: String, required: true, default: 'User' },
     
     // Push notifications
