@@ -2,7 +2,13 @@ const sgMail = require('@sendgrid/mail');
 const config = require('config.js');
 
 // Initialize SendGrid with API key
-sgMail.setApiKey(config.sendGridApiKey);
+if (!config.sendGridApiKey) {
+    console.error('❌ CRITICAL: SENDGRID_API_KEY environment variable is not set!');
+    console.error('   Email sending will fail. Set SENDGRID_API_KEY in your environment.');
+} else {
+    sgMail.setApiKey(config.sendGridApiKey);
+    console.log('✅ SendGrid API key configured');
+}
 
 module.exports = sendEmail;
 
@@ -24,6 +30,11 @@ module.exports = sendEmail;
  */
 async function sendEmail({ to, subject, html, text, from = config.emailFrom }, retryCount = 0) {
     try {
+        // Validate API key first
+        if (!config.sendGridApiKey) {
+            throw new Error('SENDGRID_API_KEY is not configured. Please set this environment variable.');
+        }
+
         // Validate inputs
         if (!to || !to.includes('@')) {
             throw new Error(`Invalid recipient email: ${to}`);
