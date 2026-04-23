@@ -93,7 +93,7 @@ function authenticate(req, res, next) {
     accountService.authenticate({ email, password, ipAddress })
         .then(({ jwtToken, refreshToken, ...account }) => {
             setTokenCookie(res, refreshToken);
-            res.json({ ...account, token: jwtToken }); // ✅ Include token
+            res.json({ ...account, id: account.id, user: account, token: jwtToken });
         })
         .catch(next);
 }

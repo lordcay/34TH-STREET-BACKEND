@@ -413,7 +413,7 @@ async function update(id, params) {
   account.updated = new Date();
   await account.save();
 
-  return account; // keep returning full account like you do
+  return basicDetails(account);
 }
 
 
