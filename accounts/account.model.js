@@ -54,6 +54,8 @@ const schema = new Schema({
     linkedIn: { type: String },
     funFact: { type: String },
     rship: { type: String },
+    // Alumni-specific
+    schoolGraduatedFrom: { type: String, default: null },
     welcomeEmailSent: { type: Boolean, default: false },
 
     // Recovery email (personal email for login after graduation)

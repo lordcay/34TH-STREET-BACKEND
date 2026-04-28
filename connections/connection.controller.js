@@ -4,42 +4,7 @@ const authorize = require('_middleware/authorize');
 const Connection = require('./connection.model');
 const db = require('_helpers/db');
 const Account = db.Account;
-
-// Expo Push Notification helper
-const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
-
-async function sendPushNotification(pushToken, title, body, data = {}) {
-  if (!pushToken || (!pushToken.startsWith('ExponentPushToken[') && !pushToken.startsWith('ExpoPushToken['))) {
-    console.log('⚠️ Invalid or missing push token');
-    return null;
-  }
-  
-  try {
-    const response = await fetch(EXPO_PUSH_URL, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        to: pushToken,
-        sound: 'default',
-        title,
-        body,
-        data,
-        priority: 'high',
-        channelId: 'connections'
-      })
-    });
-    
-    const result = await response.json();
-    console.log('📤 Push notification sent:', result);
-    return result;
-  } catch (error) {
-    console.error('❌ Push notification failed:', error);
-    return null;
-  }
-}
+const { sendExpoPush } = require('../messages/utils/push');
 
 // =============================================
 // SEND CONNECTION REQUEST
@@ -113,17 +78,18 @@ router.post('/request', authorize(), async (req, res, next) => {
 
     // Send push notification to target user
     if (targetUser?.expoPushToken) {
-      await sendPushNotification(
-        targetUser.expoPushToken,
-        'New Connection Request 🤝',
-        `${requesterName} wants to connect with you`,
-        {
+      await sendExpoPush({
+        to: targetUser.expoPushToken,
+        title: 'New Connection Request 🤝',
+        body: `${requesterName} wants to connect with you`,
+        channelId: 'connections',
+        data: {
           type: 'connection_request',
           requesterId: String(requesterId),
           requesterName,
-          screen: 'Notifications'
-        }
-      );
+          screen: 'Notifications',
+        },
+      }).catch(err => console.error('Connection request push failed:', err?.message));
       console.log('📤 Push notification sent to', targetUserId);
     } else {
       console.log('⚠️ No push token for user', targetUserId);
@@ -235,17 +201,18 @@ router.post('/accept/:requesterId', authorize(), async (req, res, next) => {
 
     // Send push notification to requester
     if (requester?.expoPushToken) {
-      await sendPushNotification(
-        requester.expoPushToken,
-        'Connection Accepted! 🎉',
-        `${targetName} accepted your connection request`,
-        {
+      await sendExpoPush({
+        to: requester.expoPushToken,
+        title: 'Connection Accepted! 🎉',
+        body: `${targetName} accepted your connection request`,
+        channelId: 'connections',
+        data: {
           type: 'connection_accepted',
           targetUserId: String(targetId),
           targetName,
-          screen: 'Notifications'
-        }
-      );
+          screen: 'Notifications',
+        },
+      }).catch(err => console.error('Connection accepted push failed:', err?.message));
       console.log('📤 Push notification (accepted) sent to', requesterId);
     } else {
       console.log('⚠️ No push token for user', requesterId);

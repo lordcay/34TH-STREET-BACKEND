@@ -399,6 +399,8 @@ async function approve(id, adminId) {
       phone: request.phone,
       type: 'Student',
       role: 'User',
+      fieldOfStudy: request.program || null,   // ✅ populate from application form
+      linkedIn: request.linkedIn || null,      // ✅ pre-fill from application
       verified: new Date(), // Pre-verified by admin
     });
   } else {
@@ -408,6 +410,8 @@ async function approve(id, adminId) {
     account.lastName = request.lastName;
     account.gender = request.gender;
     account.phone = request.phone;
+    account.fieldOfStudy = request.program || account.fieldOfStudy || null; // ✅ populate
+    account.linkedIn = request.linkedIn || account.linkedIn || null;         // ✅ populate
     account.verified = new Date();
   }
 

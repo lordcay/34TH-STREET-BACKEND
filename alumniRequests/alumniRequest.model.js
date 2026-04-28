@@ -7,7 +7,7 @@ const alumniRequestSchema = new Schema({
   gender: { type: String, required: true, enum: ['Male', 'Female', 'Non-binary'] },
   phone: { type: String, required: true, trim: true },
   personalEmail: { type: String, required: true, trim: true, lowercase: true },
-  workEmail: { type: String, required: true, trim: true, lowercase: true },
+  workEmail: { type: String, trim: true, lowercase: true, default: null },
   schoolGraduatedFrom: { type: String, required: true, trim: true },
   degreeHeld: { type: String, required: true, trim: true },
   linkedIn: { type: String, required: true, trim: true },

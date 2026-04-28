@@ -54,7 +54,7 @@ function submitSchema(req, res, next) {
     gender: Joi.string().valid('Male', 'Female', 'Non-binary').required(),
     phone: Joi.string().required(),
     personalEmail: Joi.string().email().required(),
-    workEmail: Joi.string().email().required(),
+    workEmail: Joi.string().email().allow('', null).optional(),
     schoolGraduatedFrom: Joi.string().required(),
     degreeHeld: Joi.string().required(),
     linkedIn: Joi.string().uri().required(),

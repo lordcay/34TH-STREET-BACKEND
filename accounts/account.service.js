@@ -400,14 +400,19 @@ async function update(id, params) {
     'title', 'firstName', 'lastName', 'nickname', 'phone', 'origin',
     'bio', 'interests', 'photos', 'languages', 'fieldOfStudy',
     'graduationYear', 'industry', 'currentRole', 'linkedIn', 'funFact',
-    'rship',
+    'rship', 'DOB',
     // ✅ location fields
     'currentCity', 'locationUpdatedAt', 'locationSharingEnabled',
 
   ];
 
   for (const key of allowed) {
-    if (key in params) account[key] = params[key];
+    if (key in params) {
+      // Never overwrite an existing DOB with null/empty — omit DOB from the
+      // payload instead of clearing it if the client has no value to send.
+      if (key === 'DOB' && !params[key] && account[key]) continue;
+      account[key] = params[key];
+    }
   }
 
   account.updated = new Date();

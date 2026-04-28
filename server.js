@@ -33,6 +33,8 @@ const ChatroomMessage = require('./chatroomMessages/chatroomMessage.model');
 const chatroomMessageRoutes = require('./chatroomMessages/chatroomMessage.routes');
 const reportRoutes = require('./reportUser/report.routes');
 const blockRoutes = require('./blockUser/block.routes');
+const { sendExpoPush } = require('./messages/utils/push');
+const Chatroom = require('./chatroom/chatroom.model');
 
 
 
@@ -275,7 +277,52 @@ io.on('connection', (socket) => {
    messageId: newMessage._id, // optional, FYI
  });
 
-    // (optional) also notify room members individually via push — handled below in section C
+    // 📲 Push notification to offline chatroom members
+    // Find members who are NOT currently connected via socket
+    try {
+      const chatroom = await Chatroom.findById(chatroomId).select('members').lean();
+      if (chatroom?.members?.length) {
+        const preview = (message || '').toString().slice(0, 80);
+        const chatroomDoc = await Chatroom.findById(chatroomId).select('name').lean();
+        const chatroomName = chatroomDoc?.name || 'Group chat';
+
+        // Get push tokens for all members EXCEPT the sender
+        const offlineMembers = chatroom.members.filter(
+          memberId => String(memberId) !== String(senderId)
+        );
+
+        if (offlineMembers.length) {
+          const memberAccounts = await Account.find(
+            { _id: { $in: offlineMembers } },
+            { _id: 1, expoPushToken: 1 }
+          ).lean();
+
+          const tokens = memberAccounts
+            .map(a => a.expoPushToken)
+            .filter(Boolean);
+
+          if (tokens.length) {
+            await sendExpoPush({
+              to: tokens,
+              title: `${senderName || 'Someone'} in ${chatroomName}`,
+              body: preview || '📷 Media',
+              channelId: 'group-messages',
+              data: {
+                kind: 'group',
+                chatroomId: String(chatroomId),
+                chatroomName,
+                senderId: String(senderId),
+                senderName: senderName || 'Someone',
+                groupName: chatroomName,
+                preview,
+              },
+            }).catch(err => console.error('Group push error:', err?.message));
+          }
+        }
+      }
+    } catch (pushErr) {
+      console.error('❌ Group push notification error:', pushErr?.message);
+    }
   } catch (err) {
     console.error('❌ Error sending chatroom message:', err);
   }
@@ -562,6 +609,139 @@ socket.on('call:toggle-audio', ({ peerId, audioEnabled }) => {
   if (peerSocketId) {
     io.to(peerSocketId).emit('call:audio-toggled', { audioEnabled });
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// CONFERENCE CALL SIGNALING (mesh WebRTC)
+// Each participant manages N peer connections, one to every other
+// participant.  The server acts as the relay / invitation bus.
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * call:invite
+ * The initiator asks a connected friend to join the ongoing call.
+ * We forward the invite to the invitee so their CallContext shows in incoming
+ * screen with the conference parameters.
+ */
+socket.on('call:invite', ({ conferenceId, inviterId, inviterName, inviterPhoto, inviteeId, callType, existingParticipants }) => {
+  const inviteeSocketId = connectedUsers[inviteeId];
+  if (!inviteeSocketId) return;
+  io.to(inviteeSocketId).emit('call:incoming', {
+    callId:               conferenceId,
+    callerId:             inviterId,
+    callerName:           inviterName,
+    callerPhoto:          inviterPhoto,
+    callType:             callType || 'audio',
+    isConference:         true,
+    conferenceId,
+    existingParticipants: existingParticipants || [],
+  });
+});
+
+/**
+ * call:invite:accept
+ * Invitee accepted the invite.
+ * 1) Notify the inviter so they create a peer connection to the new participant.
+ * 2) Notify every *other* existing participant so they also create peer connections.
+ */
+socket.on('call:invite:accept', ({ conferenceId, accepterId, accepterName, accepterPhoto, inviterId, participantIds }) => {
+  // Tell inviter: the new person accepted
+  const inviterSocket = connectedUsers[inviterId];
+  if (inviterSocket) {
+    io.to(inviterSocket).emit('call:invite:accepted', {
+      conferenceId, accepterId, accepterName, accepterPhoto,
+    });
+  }
+
+  // Tell every other existing participant to connect to the new arrival
+  (participantIds || []).forEach(pid => {
+    if (pid === inviterId || pid === accepterId) return;
+    const pSocket = connectedUsers[pid];
+    if (pSocket) {
+      io.to(pSocket).emit('call:conference:peer:ready', {
+        conferenceId,
+        newParticipantId:    accepterId,
+        newParticipantName:  accepterName,
+        newParticipantPhoto: accepterPhoto,
+      });
+    }
+  });
+
+  // Broadcast globally that someone joined (for future participant list sync)
+  const participantSockets = (participantIds || [])
+    .map(id => connectedUsers[id])
+    .filter(Boolean);
+  participantSockets.forEach(sid => {
+    io.to(sid).emit('call:participant:joined', {
+      conferenceId,
+      participantId:    accepterId,
+      participantName:  accepterName,
+      participantPhoto: accepterPhoto,
+    });
+  });
+});
+
+/**
+ * call:conference:joined
+ * A new caller announces themselves to all existing participants.
+ * Each existing participant will create an offer to the joiner.
+ */
+socket.on('call:conference:joined', ({ conferenceId, joinerId, joinerName, joinerPhoto, participantIds }) => {
+  (participantIds || []).forEach(pid => {
+    if (pid === joinerId) return;
+    const pSocket = connectedUsers[pid];
+    if (pSocket) {
+      io.to(pSocket).emit('call:conference:peer:ready', {
+        conferenceId,
+        newParticipantId:    joinerId,
+        newParticipantName:  joinerName,
+        newParticipantPhoto: joinerPhoto,
+      });
+    }
+  });
+});
+
+/**
+ * call:conference:offer  — relay SDP offer between conference participants
+ */
+socket.on('call:conference:offer', ({ targetId, fromId, offer, conferenceId }) => {
+  const targetSocket = connectedUsers[targetId];
+  if (targetSocket) {
+    io.to(targetSocket).emit('call:conference:offer', { fromId, offer, conferenceId });
+  }
+});
+
+/**
+ * call:conference:answer — relay SDP answer between conference participants
+ */
+socket.on('call:conference:answer', ({ targetId, fromId, answer, conferenceId }) => {
+  const targetSocket = connectedUsers[targetId];
+  if (targetSocket) {
+    io.to(targetSocket).emit('call:conference:answer', { fromId, answer, conferenceId });
+  }
+});
+
+/**
+ * call:conference:ice-candidate — relay ICE candidates between conference participants
+ */
+socket.on('call:conference:ice-candidate', ({ targetId, fromId, candidate, conferenceId }) => {
+  const targetSocket = connectedUsers[targetId];
+  if (targetSocket) {
+    io.to(targetSocket).emit('call:conference:ice-candidate', { fromId, candidate, conferenceId });
+  }
+});
+
+/**
+ * call:participant:left — someone voluntarily left the conference.
+ * Relay to all remaining participants so they can close their peer connection.
+ */
+socket.on('call:participant:left', ({ conferenceId, leaverId, remainingParticipantIds }) => {
+  (remainingParticipantIds || []).forEach(pid => {
+    const pSocket = connectedUsers[pid];
+    if (pSocket) {
+      io.to(pSocket).emit('call:participant:left', { conferenceId, leaverId });
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════

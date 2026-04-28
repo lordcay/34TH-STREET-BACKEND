@@ -49,7 +49,7 @@ async function sendOtp({ personalEmail, firstName }) {
       gender: 'Male',
       phone: 'pending',
       personalEmail: email,
-      workEmail: 'pending@pending.com',
+      workEmail: null,
       schoolGraduatedFrom: 'pending',
       degreeHeld: 'pending',
       linkedIn: 'https://linkedin.com/in/pending',
@@ -227,16 +227,19 @@ async function submitRequest(params) {
 
   if (!request) throw 'Please verify your personal email first before submitting.';
 
-  const existingWorkEmail = await Account.findOne({ email: params.workEmail.toLowerCase().trim() });
-  if (existingWorkEmail && existingWorkEmail.verified) {
-    throw 'An account with this work email already exists.';
+  // Only check workEmail uniqueness if provided
+  if (params.workEmail && params.workEmail.trim()) {
+    const existingWorkEmail = await Account.findOne({ email: params.workEmail.toLowerCase().trim() });
+    if (existingWorkEmail && existingWorkEmail.verified) {
+      throw 'An account with this work email already exists.';
+    }
   }
 
   request.firstName = params.firstName;
   request.lastName = params.lastName;
   request.gender = params.gender;
   request.phone = params.phone;
-  request.workEmail = params.workEmail.toLowerCase().trim();
+  request.workEmail = params.workEmail ? params.workEmail.toLowerCase().trim() : null;
   request.schoolGraduatedFrom = params.schoolGraduatedFrom;
   request.degreeHeld = params.degreeHeld;
   request.linkedIn = params.linkedIn;
@@ -304,15 +307,20 @@ async function approve(id, adminId) {
   if (!request) throw 'Request not found';
   if (request.status !== 'pending') throw 'Request has already been processed';
 
-  const existingAccount = await Account.findOne({ email: request.workEmail });
+  // Login email: prefer workEmail if provided, otherwise use personalEmail
+  const loginEmail = (request.workEmail && request.workEmail !== 'pending@pending.com')
+    ? request.workEmail
+    : request.personalEmail;
+
+  const existingAccount = await Account.findOne({ email: loginEmail });
   if (existingAccount && existingAccount.verified) {
-    throw 'An account with this work email already exists.';
+    throw 'An account with this email already exists.';
   }
 
   let account = existingAccount;
   if (!account) {
     account = new Account({
-      email: request.workEmail,
+      email: loginEmail,
       passwordHash: request.passwordHash,
       firstName: request.firstName,
       lastName: request.lastName,
@@ -321,6 +329,10 @@ async function approve(id, adminId) {
       type: 'Alumni',
       role: 'User',
       verified: new Date(),
+      // Alumni-specific profile data
+      schoolGraduatedFrom: request.schoolGraduatedFrom,
+      fieldOfStudy: request.degreeHeld,
+      linkedIn: request.linkedIn,
     });
   } else {
     account.passwordHash = request.passwordHash;
@@ -329,6 +341,9 @@ async function approve(id, adminId) {
     account.gender = request.gender;
     account.phone = request.phone;
     account.verified = new Date();
+    account.schoolGraduatedFrom = request.schoolGraduatedFrom;
+    account.fieldOfStudy = request.degreeHeld;
+    account.linkedIn = request.linkedIn;
   }
 
   await account.save();
