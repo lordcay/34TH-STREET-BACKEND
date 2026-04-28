@@ -120,6 +120,10 @@ router.post('/request', authorize(), async (req, res, next) => {
     });
 
   } catch (error) {
+    // Race condition: two simultaneous requests hit at the same time — treat as duplicate
+    if (error.code === 11000) {
+      return res.status(200).json({ message: 'Request already pending', connection: { status: 'pending', targetUserId: req.body?.targetUserId } });
+    }
     console.error('❌ Send connection request error:', error);
     next(error);
   }
